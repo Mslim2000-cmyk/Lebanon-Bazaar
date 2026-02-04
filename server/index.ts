@@ -2,6 +2,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
+import { seedDatabase } from "./seed";
 
 const app = express();
 const httpServer = createServer(app);
@@ -60,6 +63,16 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Setup authentication
+  await setupAuth(app);
+  registerAuthRoutes(app);
+  
+  // Setup object storage routes
+  registerObjectStorageRoutes(app);
+  
+  // Seed database with initial data
+  await seedDatabase();
+  
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
