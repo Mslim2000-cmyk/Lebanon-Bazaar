@@ -151,7 +151,7 @@ export async function registerRoutes(
     
     const data = insertSellerSchema.parse({
       ...req.body,
-      userId: user.id,
+      ownerUserId: user.id,
       status: "pending",
     });
     const seller = await storage.createSeller(data);

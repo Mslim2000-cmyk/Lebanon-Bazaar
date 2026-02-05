@@ -25,7 +25,7 @@ export const categories = pgTable("categories", {
 // Sellers table
 export const sellers = pgTable("sellers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull(),
+  ownerUserId: varchar("user_id").notNull(),
   businessName: text("business_name").notNull(),
   businessNameAr: text("business_name_ar"),
   bio: text("bio"),
@@ -37,6 +37,17 @@ export const sellers = pgTable("sellers", {
   status: sellerStatusEnum("status").default("pending").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  appliedAt: {
+      type: Date,
+      default: Date.now
+    },
+
+    reviewedAt: Date,
+
+   reviewedBy: varchar("reviewed_by"),
+
+    rejectionReason: String
+  )
 });
 
 // Products table
