@@ -63,13 +63,13 @@ export default function BecomeSeller() {
   const createSellerMutation = useMutation({
     mutationFn: async (data: SellerFormData) => {
       const sellerData = {
-        ...data,
-        userId: user?.id,
-        deliveryAreas: data.deliveryAreas
-          ? data.deliveryAreas.split(",").map((a) => a.trim()).filter(Boolean)
-          : [],
+        businessName: data.businessName,
+        businessNameAr: data.businessNameAr || null,
+        phone: data.phone,
+        location: data.location,
+        bio: data.bio || null,
       };
-      return await apiRequest("POST", "/api/sellers", sellerData);
+      return await apiRequest("POST", "/api/sellers/apply", sellerData);
     },
     onSuccess: () => {
       setSubmitted(true);

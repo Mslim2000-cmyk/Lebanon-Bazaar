@@ -3,12 +3,18 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { 
   insertCategorySchema, 
-  insertSellerSchema, 
   insertProductSchema, 
   insertOrderSchema,
-  insertOrderItemSchema 
+  insertOrderItemSchema,
+  sellerApplicationSchema 
 } from "@shared/schema";
 import { z } from "zod";
+import { 
+  applyToBecomeSeller, 
+  approveSeller, 
+  rejectSeller, 
+  SellerApplicationError 
+} from "./services/seller";
 
 // Helper to get user from session (from Replit Auth)
 function getUser(req: Request) {
@@ -139,23 +145,20 @@ export async function registerRoutes(
     res.json(products.filter(p => p.isAvailable));
   }));
 
-  // Create seller application
-  app.post("/api/sellers", requireAuth, asyncHandler(async (req, res) => {
+  // Submit seller application
+  app.post("/api/sellers/apply", requireAuth, asyncHandler(async (req, res) => {
     const user = getUser(req);
     
-    // Check if user already has a seller profile
-    const existingSeller = await storage.getSellerByUserId(user.id);
-    if (existingSeller) {
-      return res.status(400).json({ error: "You already have a seller application" });
+    try {
+      const application = sellerApplicationSchema.parse(req.body);
+      const seller = await applyToBecomeSeller(user.id, application);
+      res.status(201).json(seller);
+    } catch (error) {
+      if (error instanceof SellerApplicationError) {
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
+      throw error;
     }
-    
-    const data = insertSellerSchema.parse({
-      ...req.body,
-      ownerUserId: user.id,
-      status: "pending",
-    });
-    const seller = await storage.createSeller(data);
-    res.status(201).json(seller);
   }));
 
   // ========== PRODUCTS ==========
@@ -354,17 +357,28 @@ export async function registerRoutes(
 
   // Update seller status (admin only)
   app.patch("/api/admin/sellers/:id/status", requireAdmin, asyncHandler(async (req, res) => {
-    const { status } = req.body;
-    const validStatuses = ["pending", "approved", "rejected", "suspended"];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: "Invalid status" });
-    }
+    const user = getUser(req);
+    const { status, rejectionReason } = req.body;
     
-    const seller = await storage.updateSellerStatus(req.params.id, status);
-    if (!seller) {
-      return res.status(404).json({ error: "Seller not found" });
+    try {
+      let seller;
+      if (status === "approved") {
+        seller = await approveSeller(req.params.id, user.id);
+      } else if (status === "rejected") {
+        seller = await rejectSeller(req.params.id, user.id, rejectionReason || "");
+      } else {
+        return res.status(400).json({ error: "Invalid status. Use 'approved' or 'rejected'." });
+      }
+      res.json(seller);
+    } catch (error) {
+      if (error instanceof SellerApplicationError) {
+        if (error.code === "NOT_FOUND") {
+          return res.status(404).json({ error: error.message, code: error.code });
+        }
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
+      throw error;
     }
-    res.json(seller);
   }));
 
   // Get all orders (admin only)

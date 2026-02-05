@@ -30,6 +30,12 @@ export interface IStorage {
   getSellerByUserId(userId: string): Promise<Seller | undefined>;
   createSeller(seller: InsertSeller): Promise<Seller>;
   updateSellerStatus(id: string, status: string): Promise<Seller | undefined>;
+  updateSellerReview(id: string, reviewData: { 
+    status: "approved" | "rejected"; 
+    reviewedAt: Date; 
+    reviewedBy: string; 
+    rejectionReason?: string | null;
+  }): Promise<Seller | undefined>;
   
   // Products
   getProducts(): Promise<Product[]>;
@@ -103,7 +109,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSellerByUserId(userId: string): Promise<Seller | undefined> {
-    const [seller] = await db.select().from(sellers).where(eq(sellers.userId, userId));
+    const [seller] = await db.select().from(sellers).where(eq(sellers.ownerUserId, userId));
     return seller;
   }
 
@@ -115,6 +121,25 @@ export class DatabaseStorage implements IStorage {
   async updateSellerStatus(id: string, status: string): Promise<Seller | undefined> {
     const [updatedSeller] = await db.update(sellers)
       .set({ status: status as any, updatedAt: new Date() })
+      .where(eq(sellers.id, id))
+      .returning();
+    return updatedSeller;
+  }
+
+  async updateSellerReview(id: string, reviewData: { 
+    status: "approved" | "rejected"; 
+    reviewedAt: Date; 
+    reviewedBy: string; 
+    rejectionReason?: string | null;
+  }): Promise<Seller | undefined> {
+    const [updatedSeller] = await db.update(sellers)
+      .set({ 
+        status: reviewData.status, 
+        reviewedAt: reviewData.reviewedAt,
+        reviewedBy: reviewData.reviewedBy,
+        rejectionReason: reviewData.rejectionReason || null,
+        updatedAt: new Date() 
+      })
       .where(eq(sellers.id, id))
       .returning();
     return updatedSeller;

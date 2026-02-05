@@ -35,19 +35,14 @@ export const sellers = pgTable("sellers", {
   profileImage: text("profile_image"),
   coverImage: text("cover_image"),
   status: sellerStatusEnum("status").default("pending").notNull(),
+  // Application metadata
+  appliedAt: timestamp("applied_at").defaultNow(),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: varchar("reviewed_by"),
+  rejectionReason: text("rejection_reason"),
+  // Timestamps
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-  appliedAt: {
-      type: Date,
-      default: Date.now
-    },
-
-    reviewedAt: Date,
-
-   reviewedBy: varchar("reviewed_by"),
-
-    rejectionReason: String
-  )
 });
 
 // Products table
@@ -139,10 +134,29 @@ export const categoriesRelations = relations(categories, ({ many }) => ({
 
 // Zod schemas for validation
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
-export const insertSellerSchema = createInsertSchema(sellers).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertSellerSchema = createInsertSchema(sellers).omit({ 
+  id: true, 
+  appliedAt: true, 
+  reviewedAt: true, 
+  reviewedBy: true, 
+  rejectionReason: true,
+  createdAt: true, 
+  updatedAt: true 
+});
 export const insertProductSchema = createInsertSchema(products).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, orderNumber: true, createdAt: true, updatedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
+
+// Seller application schema (only fields submitted by applicants)
+export const sellerApplicationSchema = z.object({
+  businessName: z.string().min(2, "Business name is required"),
+  businessNameAr: z.string().nullable().optional(),
+  phone: z.string().min(8, "Valid phone number required"),
+  location: z.string().min(2, "Location is required"),
+  bio: z.string().nullable().optional(),
+});
+
+export type SellerApplication = z.infer<typeof sellerApplicationSchema>;
 
 // Types
 export type Category = typeof categories.$inferSelect;
