@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useLocation } from "wouter";
 import { MainLayout } from "@/components/layout/main-layout";
 import { Button } from "@/components/ui/button";
@@ -8,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -23,7 +22,6 @@ import {
 } from "@/components/ui/form";
 import { 
   Store, 
-  CheckCircle, 
   Loader2,
   Sparkles,
   HandHeart,
@@ -34,10 +32,9 @@ import {
 const sellerSchema = z.object({
   businessName: z.string().min(2, "Business name is required"),
   businessNameAr: z.string().optional(),
-  bio: z.string().min(20, "Please write at least 20 characters about your craft"),
+  bio: z.string().optional(),
   phone: z.string().min(8, "Valid phone number is required"),
   location: z.string().min(2, "Location is required"),
-  deliveryAreas: z.string().optional(),
 });
 
 type SellerFormData = z.infer<typeof sellerSchema>;
@@ -46,7 +43,6 @@ export default function BecomeSeller() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const [submitted, setSubmitted] = useState(false);
 
   const form = useForm<SellerFormData>({
     resolver: zodResolver(sellerSchema),
@@ -56,7 +52,6 @@ export default function BecomeSeller() {
       bio: "",
       phone: "",
       location: "",
-      deliveryAreas: "",
     },
   });
 
@@ -72,11 +67,12 @@ export default function BecomeSeller() {
       return await apiRequest("POST", "/api/sellers/apply", sellerData);
     },
     onSuccess: () => {
-      setSubmitted(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/sellers/me"] });
       toast({
         title: "Application submitted!",
         description: "We'll review your application and get back to you soon.",
       });
+      setLocation("/seller/dashboard");
     },
     onError: (error: Error) => {
       toast({
@@ -160,25 +156,6 @@ export default function BecomeSeller() {
     );
   }
 
-  if (submitted) {
-    return (
-      <MainLayout>
-        <div className="container mx-auto px-4 py-16 text-center max-w-lg">
-          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
-            <CheckCircle className="h-10 w-10 text-primary" />
-          </div>
-          <h1 className="font-serif text-2xl font-bold mb-4">Application Submitted!</h1>
-          <p className="text-muted-foreground mb-8">
-            Thank you for applying to become an artisan seller. We'll review your application and contact you soon.
-          </p>
-          <Button onClick={() => setLocation("/")} data-testid="button-back-home">
-            Back to Home
-          </Button>
-        </div>
-      </MainLayout>
-    );
-  }
-
   return (
     <MainLayout>
       <div className="container mx-auto px-4 py-8 max-w-2xl">
@@ -247,7 +224,7 @@ export default function BecomeSeller() {
                   name="bio"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>About Your Craft *</FormLabel>
+                      <FormLabel>About Your Craft (optional)</FormLabel>
                       <FormControl>
                         <Textarea 
                           placeholder="Tell us about yourself and your craft. What makes your work unique?"
@@ -298,27 +275,6 @@ export default function BecomeSeller() {
                     )}
                   />
                 </div>
-
-                <FormField
-                  control={form.control}
-                  name="deliveryAreas"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Delivery Areas (optional)</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Beirut, Mount Lebanon, Tripoli..." 
-                          {...field}
-                          data-testid="input-delivery-areas" 
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Separate multiple areas with commas
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
                 <Button 
                   type="submit" 

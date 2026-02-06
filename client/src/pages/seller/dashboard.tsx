@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useSeller } from "@/hooks/use-seller";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { 
@@ -21,27 +22,23 @@ import {
   Store,
   AlertCircle
 } from "lucide-react";
-import type { Seller, Product, Order } from "@shared/schema";
+import type { Product, Order } from "@shared/schema";
 
 export default function SellerDashboard() {
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-
-  const { data: seller, isLoading: sellerLoading, error: sellerError } = useQuery<Seller>({
-    queryKey: ["/api/sellers/me"],
-    enabled: isAuthenticated,
-  });
+  const { seller, isApproved, isPending, isRejected, isLoading: sellerLoading } = useSeller();
 
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/sellers/me/products"],
-    enabled: !!seller && seller.status === "approved",
+    enabled: isApproved,
   });
 
   const { data: orders, isLoading: ordersLoading } = useQuery<Order[]>({
     queryKey: ["/api/sellers/me/orders"],
-    enabled: !!seller && seller.status === "approved",
+    enabled: isApproved,
   });
   // TODO: enforce order status transitions in backend
 
@@ -95,7 +92,7 @@ export default function SellerDashboard() {
     );
   }
 
-  if (seller.status === "pending") {
+  if (isPending) {
     return (
       <MainLayout>
         <div className="container mx-auto px-4 py-16 text-center">
@@ -112,16 +109,20 @@ export default function SellerDashboard() {
     );
   }
 
-  if (seller.status === "rejected") {
+  if (isRejected) {
     return (
       <MainLayout>
         <div className="container mx-auto px-4 py-16 text-center">
           <AlertCircle className="h-16 w-16 text-destructive mx-auto mb-6" />
           <h1 className="font-serif text-2xl font-bold mb-4">Application Not Approved</h1>
           <p className="text-muted-foreground mb-6">
-            Unfortunately, your seller application was not approved. 
-            Please contact us for more information.
+            Unfortunately, your seller application was not approved.
           </p>
+          {seller?.rejectionReason && (
+            <p className="text-sm text-muted-foreground" data-testid="text-rejection-reason">
+              Reason: {seller.rejectionReason}
+            </p>
+          )}
         </div>
       </MainLayout>
     );
