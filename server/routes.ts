@@ -18,7 +18,9 @@ import {
 
 // Helper to get user from session (from Replit Auth)
 function getUser(req: Request) {
-  return (req as any).user;
+  const raw = (req as any).user;
+  if (!raw) return null;
+  return { id: raw.claims?.sub as string, ...raw };
 }
 
 // Middleware to require authentication
