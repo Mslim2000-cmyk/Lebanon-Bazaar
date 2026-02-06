@@ -8,6 +8,7 @@ import {
   sellerApplicationSchema,
   createProductSchema,
   updateProductSchema,
+  createOrderSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { 
@@ -243,6 +244,9 @@ export async function registerRoutes(
     }
     
     const product = await storage.updateProduct(req.params.id, validated);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
     res.json(product);
   }));
 
@@ -250,22 +254,7 @@ export async function registerRoutes(
   
   // Create order (guest checkout allowed)
   app.post("/api/orders", asyncHandler(async (req, res) => {
-    const orderSchema = z.object({
-      sellerId: z.string(),
-      buyerName: z.string().min(2),
-      buyerPhone: z.string().min(8),
-      buyerEmail: z.string().email().nullable().optional(),
-      deliveryAddress: z.string().min(10),
-      deliveryNotes: z.string().nullable().optional(),
-      items: z.array(z.object({
-        productId: z.string(),
-        productName: z.string(),
-        quantity: z.number().int().positive(),
-        priceUsd: z.string(),
-      })).min(1),
-    });
-    
-    const data = orderSchema.parse(req.body);
+    const data = createOrderSchema.parse(req.body);
     
     // Verify seller exists and is approved
     const seller = await storage.getSellerById(data.sellerId);

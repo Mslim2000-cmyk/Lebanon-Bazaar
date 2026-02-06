@@ -149,7 +149,7 @@ export const insertProductSchema = createInsertSchema(products).omit({ id: true,
 export const createProductSchema = z.object({
   name: z.string().min(2, "Product name is required"),
   nameAr: z.string().nullable().optional(),
-  description: z.string().min(2, "Description is required"),
+  description: z.string().min(20, "Description must be at least 20 characters"),
   descriptionAr: z.string().nullable().optional(),
   priceUsd: z.string().refine((val) => {
     const num = parseFloat(val);
@@ -163,7 +163,7 @@ export const createProductSchema = z.object({
 export const updateProductSchema = z.object({
   name: z.string().min(2, "Product name is required").optional(),
   nameAr: z.string().nullable().optional(),
-  description: z.string().min(2, "Description is required").optional(),
+  description: z.string().min(20, "Description must be at least 20 characters").optional(),
   descriptionAr: z.string().nullable().optional(),
   priceUsd: z.string().refine((val) => {
     const num = parseFloat(val);
@@ -175,6 +175,21 @@ export const updateProductSchema = z.object({
 });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, orderNumber: true, createdAt: true, updatedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
+
+export const createOrderSchema = z.object({
+  sellerId: z.string(),
+  buyerName: z.string().min(2),
+  buyerPhone: z.string().min(8),
+  buyerEmail: z.string().email().nullable().optional(),
+  deliveryAddress: z.string().min(10),
+  deliveryNotes: z.string().nullable().optional(),
+  items: z.array(z.object({
+    productId: z.string(),
+    productName: z.string(),
+    quantity: z.number().int().positive(),
+    priceUsd: z.string(),
+  })).min(1),
+});
 
 // Seller application schema (only fields submitted by applicants)
 export const sellerApplicationSchema = z.object({
