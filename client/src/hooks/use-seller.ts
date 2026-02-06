@@ -1,23 +1,37 @@
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/use-auth";
 import type { Seller } from "@shared/schema";
 
-export function useSeller() {
-  const { isAuthenticated } = useAuth();
-
-  const { data: seller, isLoading } = useQuery<Seller>({
-    queryKey: ["/api/sellers/me"],
-    enabled: isAuthenticated,
+async function fetchSeller(): Promise<Seller | null> {
+  const res = await fetch("/api/sellers/me", {
+    credentials: "include",
   });
 
-  const status = seller?.status ?? null;
+  if (res.status === 401 || res.status === 404) {
+    return null;
+  }
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch seller");
+  }
+
+  return res.json();
+}
+
+export function useSeller() {
+  const { data: seller, isLoading } = useQuery<Seller | null>({
+    queryKey: ["/api/sellers/me"],
+    queryFn: fetchSeller,
+    retry: false,
+  });
+
+  const status = seller?.status;
 
   return {
-    seller: seller ?? null,
+    seller,
     status,
+    isLoading,
     isApproved: status === "approved",
     isPending: status === "pending",
     isRejected: status === "rejected",
-    isLoading,
   };
 }
