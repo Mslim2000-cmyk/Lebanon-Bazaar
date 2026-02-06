@@ -145,6 +145,34 @@ export const insertSellerSchema = createInsertSchema(sellers).omit({
   updatedAt: true 
 });
 export const insertProductSchema = createInsertSchema(products).omit({ id: true, createdAt: true, updatedAt: true });
+
+export const createProductSchema = z.object({
+  name: z.string().min(2, "Product name is required"),
+  nameAr: z.string().nullable().optional(),
+  description: z.string().min(2, "Description is required"),
+  descriptionAr: z.string().nullable().optional(),
+  priceUsd: z.string().refine((val) => {
+    const num = parseFloat(val);
+    return !isNaN(num) && num > 0;
+  }, "Price must be a positive number"),
+  categoryId: z.string().min(1, "Category is required"),
+  images: z.array(z.string()).min(1, "At least one image is required").max(5, "Maximum 5 images allowed"),
+  isAvailable: z.boolean().optional().default(true),
+});
+
+export const updateProductSchema = z.object({
+  name: z.string().min(2, "Product name is required").optional(),
+  nameAr: z.string().nullable().optional(),
+  description: z.string().min(2, "Description is required").optional(),
+  descriptionAr: z.string().nullable().optional(),
+  priceUsd: z.string().refine((val) => {
+    const num = parseFloat(val);
+    return !isNaN(num) && num > 0;
+  }, "Price must be a positive number").optional(),
+  categoryId: z.string().min(1, "Category is required").optional(),
+  images: z.array(z.string()).min(1, "At least one image is required").max(5, "Maximum 5 images allowed").optional(),
+  isAvailable: z.boolean().optional(),
+});
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, orderNumber: true, createdAt: true, updatedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
 
@@ -168,6 +196,8 @@ export type InsertSeller = z.infer<typeof insertSellerSchema>;
 
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
+export type CreateProduct = z.infer<typeof createProductSchema>;
+export type UpdateProduct = z.infer<typeof updateProductSchema>;
 
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;

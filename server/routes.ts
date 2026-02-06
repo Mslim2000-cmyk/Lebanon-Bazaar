@@ -3,10 +3,11 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { 
   insertCategorySchema, 
-  insertProductSchema, 
   insertOrderSchema,
   insertOrderItemSchema,
-  sellerApplicationSchema 
+  sellerApplicationSchema,
+  createProductSchema,
+  updateProductSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { 
@@ -204,11 +205,18 @@ export async function registerRoutes(
     const user = getUser(req);
     const seller = await requireApprovedSeller(user.id);
     
-    const data = insertProductSchema.parse({
-      ...req.body,
+    const validated = createProductSchema.parse(req.body);
+    
+    const category = await storage.getCategoryById(validated.categoryId);
+    if (!category) {
+      return res.status(400).json({ error: "Invalid category" });
+    }
+    
+    const product = await storage.createProduct({
+      ...validated,
       sellerId: seller.id,
+      isFeatured: false,
     });
-    const product = await storage.createProduct(data);
     res.status(201).json(product);
   }));
 
@@ -225,16 +233,16 @@ export async function registerRoutes(
       return res.status(403).json({ error: "Access denied" });
     }
     
-    // Allowlist of fields that sellers can update (prevent updating sellerId, isFeatured, etc.)
-    const allowedFields = ["name", "nameAr", "description", "descriptionAr", "priceUsd", "categoryId", "images", "isAvailable"];
-    const updateData: Record<string, any> = {};
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updateData[field] = req.body[field];
+    const validated = updateProductSchema.parse(req.body);
+    
+    if (validated.categoryId) {
+      const category = await storage.getCategoryById(validated.categoryId);
+      if (!category) {
+        return res.status(400).json({ error: "Invalid category" });
       }
     }
     
-    const product = await storage.updateProduct(req.params.id, updateData);
+    const product = await storage.updateProduct(req.params.id, validated);
     res.json(product);
   }));
 
