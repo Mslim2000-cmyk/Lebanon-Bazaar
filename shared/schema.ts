@@ -134,6 +134,7 @@ export const categoriesRelations = relations(categories, ({ many }) => ({
 
 // Zod schemas for validation
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
+// ⚠️ DO NOT USE WITH USER INPUT
 export const insertSellerSchema = createInsertSchema(sellers).omit({ 
   id: true, 
   appliedAt: true, 

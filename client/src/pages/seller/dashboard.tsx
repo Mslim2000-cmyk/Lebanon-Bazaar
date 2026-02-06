@@ -43,6 +43,7 @@ export default function SellerDashboard() {
     queryKey: ["/api/sellers/me/orders"],
     enabled: !!seller && seller.status === "approved",
   });
+  // TODO: enforce order status transitions in backend
 
   const updateOrderStatusMutation = useMutation({
     mutationFn: async ({ orderId, status }: { orderId: string; status: string }) => {
