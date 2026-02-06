@@ -15,6 +15,7 @@ import {
   rejectSeller, 
   SellerApplicationError 
 } from "./services/seller";
+import { requireApprovedSeller, ForbiddenError } from "./utils/guards";
 
 // Helper to get user from session (from Replit Auth)
 function getUser(req: Request) {
@@ -55,7 +56,12 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 // Async handler wrapper
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) {
   return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+    Promise.resolve(fn(req, res, next)).catch((err) => {
+      if (err instanceof ForbiddenError) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      next(err);
+    });
   };
 }
 
@@ -109,10 +115,7 @@ export async function registerRoutes(
   // Get current seller's products
   app.get("/api/sellers/me/products", requireAuth, asyncHandler(async (req, res) => {
     const user = getUser(req);
-    const seller = await storage.getSellerByUserId(user.id);
-    if (!seller) {
-      return res.status(404).json({ error: "Seller profile not found" });
-    }
+    const seller = await requireApprovedSeller(user.id);
     const products = await storage.getProductsBySeller(seller.id);
     res.json(products);
   }));
@@ -120,10 +123,7 @@ export async function registerRoutes(
   // Get current seller's orders
   app.get("/api/sellers/me/orders", requireAuth, asyncHandler(async (req, res) => {
     const user = getUser(req);
-    const seller = await storage.getSellerByUserId(user.id);
-    if (!seller) {
-      return res.status(404).json({ error: "Seller profile not found" });
-    }
+    const seller = await requireApprovedSeller(user.id);
     const orders = await storage.getOrdersBySeller(seller.id);
     res.json(orders);
   }));
@@ -202,11 +202,7 @@ export async function registerRoutes(
   // Create product (seller only)
   app.post("/api/products", requireAuth, asyncHandler(async (req, res) => {
     const user = getUser(req);
-    const seller = await storage.getSellerByUserId(user.id);
-    
-    if (!seller || seller.status !== "approved") {
-      return res.status(403).json({ error: "You must be an approved seller to add products" });
-    }
+    const seller = await requireApprovedSeller(user.id);
     
     const data = insertProductSchema.parse({
       ...req.body,
@@ -219,15 +215,14 @@ export async function registerRoutes(
   // Update product (seller only)
   app.patch("/api/products/:id", requireAuth, asyncHandler(async (req, res) => {
     const user = getUser(req);
-    const seller = await storage.getSellerByUserId(user.id);
-    
-    if (!seller) {
-      return res.status(403).json({ error: "Seller profile not found" });
-    }
+    const seller = await requireApprovedSeller(user.id);
     
     const existingProduct = await storage.getProductById(req.params.id);
-    if (!existingProduct || existingProduct.sellerId !== seller.id) {
+    if (!existingProduct) {
       return res.status(404).json({ error: "Product not found" });
+    }
+    if (existingProduct.sellerId !== seller.id) {
+      return res.status(403).json({ error: "Access denied" });
     }
     
     // Allowlist of fields that sellers can update (prevent updating sellerId, isFeatured, etc.)
@@ -328,15 +323,14 @@ export async function registerRoutes(
   // Update order status (seller only)
   app.patch("/api/orders/:id/status", requireAuth, asyncHandler(async (req, res) => {
     const user = getUser(req);
-    const seller = await storage.getSellerByUserId(user.id);
-    
-    if (!seller) {
-      return res.status(403).json({ error: "Seller profile not found" });
-    }
+    const seller = await requireApprovedSeller(user.id);
     
     const order = await storage.getOrderById(req.params.id);
-    if (!order || order.sellerId !== seller.id) {
+    if (!order) {
       return res.status(404).json({ error: "Order not found" });
+    }
+    if (order.sellerId !== seller.id) {
+      return res.status(403).json({ error: "Access denied" });
     }
     
     const { status } = req.body;
