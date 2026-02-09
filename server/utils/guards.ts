@@ -18,7 +18,7 @@ export async function requireApprovedSeller(userId: string): Promise<Seller> {
   }
 
   if (seller.status !== "approved") {
-    throw new ForbiddenError("Seller access required");
+    throw new ForbiddenError("Seller application is pending approval");
   }
 
   return seller;

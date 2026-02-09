@@ -45,6 +45,9 @@ if (ADMIN_USER_IDS.length === 0) {
 
 // Middleware to require admin authorization
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (ADMIN_USER_IDS.length === 0) {
+    return res.status(500).json({ error: "Admin user IDs not configured" });
+  }
   const user = getUser(req);
   if (!user) {
     return res.status(401).json({ error: "Authentication required" });
@@ -60,7 +63,7 @@ function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => P
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch((err) => {
       if (err instanceof ForbiddenError) {
-        return res.status(403).json({ error: "Access denied" });
+        return res.status(403).json({ error: err.message });
       }
       next(err);
     });
@@ -349,9 +352,14 @@ export async function registerRoutes(
   }));
 
   // Update seller status (admin only)
-  app.patch("/api/admin/sellers/:id/status", requireAdmin, asyncHandler(async (req, res) => {
+  app.patch("/api/admin/sellers/:id/status", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     const user = getUser(req);
-    const { status, rejectionReason } = req.body;
+    
+    const adminSellerStatusSchema = z.object({
+      status: z.enum(["approved", "rejected"]),
+      rejectionReason: z.string().optional(),
+    });
+    const { status, rejectionReason } = adminSellerStatusSchema.parse(req.body);
     
     try {
       let seller;
