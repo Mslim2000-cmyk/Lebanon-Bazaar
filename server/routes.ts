@@ -19,6 +19,9 @@ import {
 } from "./services/seller";
 import { requireApprovedSeller, ForbiddenError } from "./utils/guards";
 
+
+
+
 // Helper to get user from session (from Replit Auth)
 function getUser(req: Request) {
   const raw = (req as any).user;
