@@ -5,7 +5,6 @@ import { createServer } from "http";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { seedDatabase } from "./seed";
-console.log("ADMIN_USER_IDS =", process.env.ADMIN_USER_IDS);
 
 const app = express();
 const httpServer = createServer(app);
