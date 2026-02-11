@@ -39,7 +39,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 // Admin user IDs (for MVP, configured via env var; in production use proper roles)
-const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || "").split(",").filter(Boolean);
+const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || "").split(",").map(id => id.trim()).filter(Boolean);
 
 // Log warning if no admin users configured
 if (ADMIN_USER_IDS.length === 0) {
@@ -52,6 +52,10 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
     return res.status(500).json({ error: "Admin user IDs not configured" });
   }
   const user = getUser(req);
+  console.log("CURRENT USER:", user?.id);
+  console.log("ADMIN LIST RAW:", process.env.ADMIN_USER_IDS);
+  console.log("ADMIN LIST PARSED:", ADMIN_USER_IDS.map(id => `[${id}]`));
+
   if (!user) {
     return res.status(401).json({ error: "Authentication required" });
   }
