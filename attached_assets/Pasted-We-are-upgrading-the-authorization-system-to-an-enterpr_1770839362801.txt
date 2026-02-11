@@ -1,0 +1,154 @@
+We are upgrading the authorization system to an enterprise-style RBAC (Role-Based Access Control).
+
+This is NOT a patch. This is a structured architectural refactor.
+
+Do NOT add hacks. Do NOT use environment-based admin lists.
+Do NOT break existing authentication.
+
+==============================
+GOALS
+==============================
+
+1) Implement proper RBAC using database tables:
+   - roles
+   - user_roles (many-to-many)
+2) Keep seller status in sellers table (do NOT turn seller into a role).
+3) Refactor admin protection to use roles from DB.
+4) Implement real email notifications on seller approval/rejection.
+5) Cleanly enforce seller state machine rules.
+6) Do NOT introduce crashes. TypeScript must pass.
+
+==============================
+STEP 1 — DATABASE DESIGN
+==============================
+
+Create tables:
+
+roles:
+- id (uuid primary key)
+- name (unique, e.g. "user", "admin")
+- createdAt
+
+user_roles:
+- userId (FK -> users.id)
+- roleId (FK -> roles.id)
+- composite unique (userId, roleId)
+
+Seed roles table with:
+- user
+- admin
+
+On user creation:
+- automatically assign "user" role.
+
+==============================
+STEP 2 — AUTHORIZATION HELPERS
+==============================
+
+Create a helper:
+
+async function userHasRole(userId: string, roleName: string): Promise<boolean>
+
+It should:
+- join user_roles + roles
+- return true if role exists
+
+Refactor requireAdmin middleware:
+
+- fetch authenticated user
+- check userHasRole(user.id, "admin")
+- return 403 if false
+
+Remove ANY environment-based admin logic.
+
+==============================
+STEP 3 — SELLER STATE MACHINE
+==============================
+
+Rules:
+
+- Only "pending" sellers can be approved or rejected.
+- Approved sellers cannot re-apply.
+- Pending sellers cannot create products.
+- Rejected sellers MAY re-apply (optional: clear old record or allow new one).
+
+Enforce this at service layer level.
+Do NOT rely only on frontend.
+
+==============================
+STEP 4 — EMAIL INTEGRATION
+==============================
+
+Integrate Resend for real transactional email.
+
+Install:
+resend
+
+Create email service:
+
+sendSellerApprovedEmail(userEmail, businessName)
+sendSellerRejectedEmail(userEmail, businessName, reason)
+
+On:
+approveSeller → send approval email
+rejectSeller → send rejection email
+
+Emails must:
+- have clear subject
+- clean minimal HTML
+- not leak internal data
+
+Use environment variable:
+RESEND_API_KEY
+
+Fail gracefully if email fails (do NOT crash approval).
+
+==============================
+STEP 5 — ADMIN DASHBOARD API HARDENING
+==============================
+
+Ensure these routes are protected:
+
+GET /api/admin/sellers
+PATCH /api/admin/sellers/:id/status
+
+Only admins can access.
+
+Return consistent JSON errors:
+{
+  error: string,
+  code?: string
+}
+
+==============================
+STEP 6 — MIGRATION SAFETY
+==============================
+
+If existing users exist:
+- ensure they receive "user" role
+- allow manual assignment of admin role via script
+
+Create a small utility script:
+assignAdminRole(userId)
+
+==============================
+FINAL CHECKLIST
+==============================
+
+- No TypeScript errors
+- No undefined variables
+- No console logs leaking auth
+- No usage of ADMIN_USER_IDS
+- Approval flow tested
+- Emails sent successfully
+- App boots without crash
+
+After implementation:
+Provide a summary of:
+- files modified
+- new tables
+- new services added
+- migration notes
+
+Do NOT rollback existing working features.
+Refactor cleanly.

@@ -1,0 +1,163 @@
+We will proceed with RBAC refactor and seller workflow hardening, but with the following architectural constraints and additions:
+
+1️⃣ RBAC – Enterprise Style (Extensible, DB-driven)
+
+Create roles table:
+
+id (uuid)
+
+name (text, unique, indexed)
+
+description (nullable)
+
+createdAt
+
+Create user_roles table:
+
+userId (FK → users.id, indexed)
+
+roleId (FK → roles.id, indexed)
+
+composite unique (userId, roleId)
+
+Add helper:
+
+userHasRole(userId: string, roleName: string): Promise<boolean>
+
+Refactor requireAdmin to use DB role check.
+
+Remove all ADMIN_USER_IDS logic permanently.
+
+⚠️ Role names must be string-based and fully extensible.
+No TypeScript enums.
+No hardcoded role checks except through helper.
+
+2️⃣ Seller State Machine (Strict Transition Control)
+
+Seller statuses remain in sellers table.
+
+Allowed transitions:
+
+pending → approved
+
+pending → rejected
+
+rejected → pending (re-apply)
+
+approved → suspended
+
+suspended → approved
+
+Disallow:
+
+approved → approved
+
+rejected → rejected
+
+direct approved → rejected
+
+All transitions must be enforced inside the service layer only.
+Routes must not contain business logic.
+
+Throw explicit typed errors for invalid transitions.
+
+3️⃣ Add Commission Flexibility (Future-proofing)
+
+Add to sellers table:
+
+commissionRate decimal NOT NULL DEFAULT 0.10
+
+Update order creation logic:
+
+commission = subtotal * seller.commissionRate
+
+
+No hardcoded 10% anymore.
+
+This avoids migration later when differentiated seller plans are introduced.
+
+4️⃣ Email Integration (Non-blocking, Safe)
+
+Use Resend
+
+Email sending must:
+
+Run AFTER DB commit
+
+Be wrapped in try/catch
+
+Never block approval
+
+Log failure silently (structured logging)
+
+Add templates:
+
+Seller Approved
+
+Seller Rejected (include rejection reason)
+
+Do not leak API keys in logs.
+
+5️⃣ Admin Dashboard Stability
+
+Add pagination to /api/admin/sellers
+
+Add pagination to /api/admin/orders
+
+Improve error responses (consistent shape)
+
+Error format standard:
+
+{
+  error: string,
+  code?: string
+}
+
+6️⃣ Add Admin Assignment Script
+
+Create utility script:
+
+assignRoleToUser(userId: string, roleName: string)
+
+
+CLI executable:
+
+npm run assign-admin <userId>
+
+
+This should insert role if not exists.
+
+7️⃣ Performance Baseline (Even for 50 Users)
+
+Add:
+
+Index on sellers.status
+
+Index on products.sellerId
+
+Index on orders.sellerId
+
+Index on user_roles.userId
+
+No premature microservices.
+But DB must be indexed correctly.
+
+8️⃣ Do NOT Change
+
+Auth system
+
+Existing seller schema (except commissionRate)
+
+Product & order structure (except commission logic)
+
+Frontend behavior
+
+After implementing, provide:
+
+Updated schema
+
+Migration plan
+
+List of removed legacy logic
+
+Final role seeding instructions
