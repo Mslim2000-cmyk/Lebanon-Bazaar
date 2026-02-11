@@ -3,8 +3,6 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { 
   insertCategorySchema, 
-  insertOrderSchema,
-  insertOrderItemSchema,
   sellerApplicationSchema,
   createProductSchema,
   updateProductSchema,
@@ -14,22 +12,18 @@ import { z } from "zod";
 import { 
   applyToBecomeSeller, 
   approveSeller, 
-  rejectSeller, 
+  rejectSeller,
+  suspendSeller,
   SellerApplicationError 
 } from "./services/seller";
 import { requireApprovedSeller, ForbiddenError } from "./utils/guards";
 
-
-
-
-// Helper to get user from session (from Replit Auth)
 function getUser(req: Request) {
   const raw = (req as any).user;
   if (!raw) return null;
   return { id: raw.claims?.sub as string, ...raw };
 }
 
-// Middleware to require authentication
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   const user = getUser(req);
   if (!user) {
@@ -38,34 +32,19 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Admin user IDs (for MVP, configured via env var; in production use proper roles)
-const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || "").split(",").map(id => id.trim()).filter(Boolean);
-
-// Log warning if no admin users configured
-if (ADMIN_USER_IDS.length === 0) {
-  console.warn("⚠️  Warning: ADMIN_USER_IDS not configured. Admin routes will be inaccessible. Set ADMIN_USER_IDS env var with comma-separated user IDs.");
-}
-
-// Middleware to require admin authorization
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (ADMIN_USER_IDS.length === 0) {
-    return res.status(500).json({ error: "Admin user IDs not configured" });
-  }
   const user = getUser(req);
-  console.log("CURRENT USER:", user?.id);
-  console.log("ADMIN LIST RAW:", process.env.ADMIN_USER_IDS);
-  console.log("ADMIN LIST PARSED:", ADMIN_USER_IDS.map(id => `[${id}]`));
-
   if (!user) {
     return res.status(401).json({ error: "Authentication required" });
   }
-  if (!ADMIN_USER_IDS.includes(user.id)) {
-    return res.status(403).json({ error: "Admin access required" });
-  }
-  next();
+  storage.userHasRole(user.id, "admin").then((isAdmin) => {
+    if (!isAdmin) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    next();
+  }).catch(next);
 }
 
-// Async handler wrapper
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch((err) => {
@@ -84,13 +63,11 @@ export async function registerRoutes(
   
   // ========== CATEGORIES ==========
   
-  // Get all categories
   app.get("/api/categories", asyncHandler(async (req, res) => {
-    const categories = await storage.getCategories();
-    res.json(categories);
+    const cats = await storage.getCategories();
+    res.json(cats);
   }));
 
-  // Get category by slug
   app.get("/api/categories/:slug", asyncHandler(async (req, res) => {
     const category = await storage.getCategoryBySlug(req.params.slug);
     if (!category) {
@@ -99,24 +76,29 @@ export async function registerRoutes(
     res.json(category);
   }));
 
-  // Create category (admin only)
-  app.post("/api/categories", requireAdmin, asyncHandler(async (req, res) => {
+  app.post("/api/categories", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+    const user = getUser(req)!;
     const data = insertCategorySchema.parse(req.body);
     const category = await storage.createCategory(data);
+    await storage.logAdminAction({
+      adminUserId: user.id,
+      action: "create_category",
+      targetType: "category",
+      targetId: category.id,
+      metadata: { name: category.name },
+    });
     res.status(201).json(category);
   }));
 
   // ========== SELLERS ==========
   
-  // Get all approved sellers (public)
   app.get("/api/sellers", asyncHandler(async (req, res) => {
-    const sellers = await storage.getApprovedSellers();
-    res.json(sellers);
+    const approvedSellers = await storage.getApprovedSellers();
+    res.json(approvedSellers);
   }));
 
-  // Get current user's seller profile
   app.get("/api/sellers/me", requireAuth, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     const seller = await storage.getSellerByUserId(user.id);
     if (!seller) {
       return res.status(404).json({ error: "Seller profile not found" });
@@ -124,23 +106,20 @@ export async function registerRoutes(
     res.json(seller);
   }));
 
-  // Get current seller's products
   app.get("/api/sellers/me/products", requireAuth, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     const seller = await requireApprovedSeller(user.id);
-    const products = await storage.getProductsBySeller(seller.id);
-    res.json(products);
+    const sellerProducts = await storage.getProductsBySeller(seller.id);
+    res.json(sellerProducts);
   }));
 
-  // Get current seller's orders
   app.get("/api/sellers/me/orders", requireAuth, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     const seller = await requireApprovedSeller(user.id);
-    const orders = await storage.getOrdersBySeller(seller.id);
-    res.json(orders);
+    const sellerOrders = await storage.getOrdersBySeller(seller.id);
+    res.json(sellerOrders);
   }));
 
-  // Get seller by ID (public)
   app.get("/api/sellers/:id", asyncHandler(async (req, res) => {
     const seller = await storage.getSellerById(req.params.id);
     if (!seller || seller.status !== "approved") {
@@ -149,19 +128,17 @@ export async function registerRoutes(
     res.json(seller);
   }));
 
-  // Get seller's products by seller ID (public)
   app.get("/api/sellers/:id/products", asyncHandler(async (req, res) => {
     const seller = await storage.getSellerById(req.params.id);
     if (!seller || seller.status !== "approved") {
       return res.status(404).json({ error: "Seller not found" });
     }
-    const products = await storage.getProductsBySeller(req.params.id);
-    res.json(products.filter(p => p.isAvailable));
+    const sellerProducts = await storage.getProductsBySeller(req.params.id);
+    res.json(sellerProducts.filter(p => p.isAvailable));
   }));
 
-  // Submit seller application
   app.post("/api/sellers/apply", requireAuth, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     
     try {
       const application = sellerApplicationSchema.parse(req.body);
@@ -177,32 +154,29 @@ export async function registerRoutes(
 
   // ========== PRODUCTS ==========
   
-  // Get all available products (public)
   app.get("/api/products", asyncHandler(async (req, res) => {
     const { category, featured, search } = req.query;
     
-    let products;
+    let productList;
     if (featured === "true") {
-      products = await storage.getFeaturedProducts();
+      productList = await storage.getFeaturedProducts();
     } else if (category && typeof category === "string") {
-      products = await storage.getProductsByCategory(category);
+      productList = await storage.getProductsByCategory(category);
     } else {
-      products = await storage.getAvailableProducts();
+      productList = await storage.getAvailableProducts();
     }
     
-    // Simple search filter
     if (search && typeof search === "string") {
       const searchLower = search.toLowerCase();
-      products = products.filter(p => 
+      productList = productList.filter(p => 
         p.name.toLowerCase().includes(searchLower) ||
         p.description.toLowerCase().includes(searchLower)
       );
     }
     
-    res.json(products);
+    res.json(productList);
   }));
 
-  // Get product by ID (public)
   app.get("/api/products/:id", asyncHandler(async (req, res) => {
     const product = await storage.getProductById(req.params.id);
     if (!product) {
@@ -211,9 +185,8 @@ export async function registerRoutes(
     res.json(product);
   }));
 
-  // Create product (seller only)
   app.post("/api/products", requireAuth, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     const seller = await requireApprovedSeller(user.id);
     
     const validated = createProductSchema.parse(req.body);
@@ -231,9 +204,8 @@ export async function registerRoutes(
     res.status(201).json(product);
   }));
 
-  // Update product (seller only)
   app.patch("/api/products/:id", requireAuth, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     const seller = await requireApprovedSeller(user.id);
     
     const existingProduct = await storage.getProductById(req.params.id);
@@ -260,26 +232,41 @@ export async function registerRoutes(
     res.json(product);
   }));
 
+  app.delete("/api/products/:id", requireAuth, asyncHandler(async (req, res) => {
+    const user = getUser(req)!;
+    const seller = await requireApprovedSeller(user.id);
+    
+    const existingProduct = await storage.getProductById(req.params.id);
+    if (!existingProduct) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    if (existingProduct.sellerId !== seller.id) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    
+    const deleted = await storage.softDeleteProduct(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    res.json({ message: "Product deleted" });
+  }));
+
   // ========== ORDERS ==========
   
-  // Create order (guest checkout allowed)
   app.post("/api/orders", asyncHandler(async (req, res) => {
     const data = createOrderSchema.parse(req.body);
     
-    // Verify seller exists and is approved
     const seller = await storage.getSellerById(data.sellerId);
     if (!seller || seller.status !== "approved") {
       return res.status(400).json({ error: "Invalid seller" });
     }
     
-    // Validate products and compute prices server-side
     const validatedItems = [];
     let subtotal = 0;
     
     for (const item of data.items) {
       const product = await storage.getProductById(item.productId);
       
-      // Verify product exists, is available, and belongs to the seller
       if (!product) {
         return res.status(400).json({ error: `Product ${item.productId} not found` });
       }
@@ -290,7 +277,6 @@ export async function registerRoutes(
         return res.status(400).json({ error: `Product "${product.name}" does not belong to this seller` });
       }
       
-      // Use server-side price (ignore client-supplied price)
       const serverPrice = Number(product.priceUsd);
       const itemTotal = serverPrice * item.quantity;
       subtotal += itemTotal;
@@ -304,8 +290,8 @@ export async function registerRoutes(
       });
     }
     
-    // Calculate commission and total server-side (10% commission)
-    const commission = subtotal * 0.1;
+    const commissionRate = Number(seller.commissionRate);
+    const commission = subtotal * commissionRate;
     const total = subtotal;
     
     const orderData = {
@@ -327,9 +313,8 @@ export async function registerRoutes(
     res.status(201).json(order);
   }));
 
-  // Update order status (seller only)
   app.patch("/api/orders/:id/status", requireAuth, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     const seller = await requireApprovedSeller(user.id);
     
     const order = await storage.getOrderById(req.params.id);
@@ -352,18 +337,20 @@ export async function registerRoutes(
 
   // ========== ADMIN ROUTES ==========
   
-  // Get all sellers (admin only)
-  app.get("/api/admin/sellers", requireAdmin, asyncHandler(async (req, res) => {
-    const sellers = await storage.getSellers();
-    res.json(sellers);
+  app.get("/api/admin/sellers", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+    const allSellers = await storage.getSellers();
+    const total = allSellers.length;
+    const paginated = allSellers.slice((page - 1) * limit, page * limit);
+    res.json({ data: paginated, total, page, limit });
   }));
 
-  // Update seller status (admin only)
   app.patch("/api/admin/sellers/:id/status", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
-    const user = getUser(req);
+    const user = getUser(req)!;
     
     const adminSellerStatusSchema = z.object({
-      status: z.enum(["approved", "rejected"]),
+      status: z.enum(["approved", "rejected", "suspended"]),
       rejectionReason: z.string().optional(),
     });
     const { status, rejectionReason } = adminSellerStatusSchema.parse(req.body);
@@ -374,9 +361,20 @@ export async function registerRoutes(
         seller = await approveSeller(req.params.id, user.id);
       } else if (status === "rejected") {
         seller = await rejectSeller(req.params.id, user.id, rejectionReason || "");
+      } else if (status === "suspended") {
+        seller = await suspendSeller(req.params.id, user.id, rejectionReason);
       } else {
-        return res.status(400).json({ error: "Invalid status. Use 'approved' or 'rejected'." });
+        return res.status(400).json({ error: "Invalid status" });
       }
+      
+      await storage.logAdminAction({
+        adminUserId: user.id,
+        action: `seller_${status}`,
+        targetType: "seller",
+        targetId: req.params.id,
+        metadata: { status, rejectionReason: rejectionReason || null },
+      });
+      
       res.json(seller);
     } catch (error) {
       if (error instanceof SellerApplicationError) {
@@ -389,10 +387,52 @@ export async function registerRoutes(
     }
   }));
 
-  // Get all orders (admin only)
-  app.get("/api/admin/orders", requireAdmin, asyncHandler(async (req, res) => {
-    const orders = await storage.getOrders();
-    res.json(orders);
+  app.get("/api/admin/orders", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+    const allOrders = await storage.getOrders();
+    const total = allOrders.length;
+    const paginated = allOrders.slice((page - 1) * limit, page * limit);
+    res.json({ data: paginated, total, page, limit });
+  }));
+
+  app.get("/api/admin/audit-log", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+    const actions = await storage.getAdminActions({ limit, offset });
+    res.json(actions);
+  }));
+
+  app.delete("/api/admin/sellers/:id", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+    const user = getUser(req)!;
+    const deleted = await storage.softDeleteSeller(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Seller not found" });
+    }
+    await storage.logAdminAction({
+      adminUserId: user.id,
+      action: "soft_delete_seller",
+      targetType: "seller",
+      targetId: req.params.id,
+      metadata: { businessName: deleted.businessName },
+    });
+    res.json({ message: "Seller deleted" });
+  }));
+
+  app.delete("/api/admin/orders/:id", requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+    const user = getUser(req)!;
+    const deleted = await storage.softDeleteOrder(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    await storage.logAdminAction({
+      adminUserId: user.id,
+      action: "soft_delete_order",
+      targetType: "order",
+      targetId: req.params.id,
+      metadata: { orderNumber: deleted.orderNumber },
+    });
+    res.json({ message: "Order deleted" });
   }));
 
   return httpServer;

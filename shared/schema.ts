@@ -1,9 +1,8 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Re-export auth models
 export * from "./models/auth";
 
 // Enums
@@ -12,7 +11,38 @@ export const orderStatusEnum = pgEnum("order_status", ["pending", "confirmed", "
 export const paymentMethodEnum = pgEnum("payment_method", ["cod"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["pending", "confirmed", "failed"]);
 
-// Categories table
+// ========== RBAC TABLES ==========
+
+export const roles = pgTable("roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const userRoles = pgTable("user_roles", {
+  userId: varchar("user_id").notNull(),
+  roleId: varchar("role_id").notNull().references(() => roles.id),
+}, (table) => [
+  uniqueIndex("user_roles_user_role_idx").on(table.userId, table.roleId),
+  index("user_roles_user_id_idx").on(table.userId),
+  index("user_roles_role_id_idx").on(table.roleId),
+]);
+
+// ========== ADMIN AUDIT TABLE ==========
+
+export const adminActions = pgTable("admin_actions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  adminUserId: varchar("admin_user_id").notNull(),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: varchar("target_id").notNull(),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// ========== BUSINESS TABLES ==========
+
 export const categories = pgTable("categories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -22,7 +52,6 @@ export const categories = pgTable("categories", {
   icon: text("icon"),
 });
 
-// Sellers table
 export const sellers = pgTable("sellers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerUserId: varchar("user_id").notNull(),
@@ -35,17 +64,18 @@ export const sellers = pgTable("sellers", {
   profileImage: text("profile_image"),
   coverImage: text("cover_image"),
   status: sellerStatusEnum("status").default("pending").notNull(),
-  // Application metadata
+  commissionRate: decimal("commission_rate", { precision: 5, scale: 4 }).default("0.1000").notNull(),
   appliedAt: timestamp("applied_at").defaultNow(),
   reviewedAt: timestamp("reviewed_at"),
   reviewedBy: varchar("reviewed_by"),
   rejectionReason: text("rejection_reason"),
-  // Timestamps
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  index("sellers_status_idx").on(table.status),
+]);
 
-// Products table
 export const products = pgTable("products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sellerId: varchar("seller_id").notNull().references(() => sellers.id),
@@ -60,9 +90,11 @@ export const products = pgTable("products", {
   isFeatured: boolean("is_featured").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  index("products_seller_id_idx").on(table.sellerId),
+]);
 
-// Orders table
 export const orders = pgTable("orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull().unique(),
@@ -80,9 +112,11 @@ export const orders = pgTable("orders", {
   totalUsd: decimal("total_usd", { precision: 10, scale: 2 }).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  index("orders_seller_id_idx").on(table.sellerId),
+]);
 
-// Order items table
 export const orderItems = pgTable("order_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderId: varchar("order_id").notNull().references(() => orders.id),
@@ -92,7 +126,19 @@ export const orderItems = pgTable("order_items", {
   priceUsd: decimal("price_usd", { precision: 10, scale: 2 }).notNull(),
 });
 
-// Relations
+// ========== RELATIONS ==========
+
+export const rolesRelations = relations(roles, ({ many }) => ({
+  userRoles: many(userRoles),
+}));
+
+export const userRolesRelations = relations(userRoles, ({ one }) => ({
+  role: one(roles, {
+    fields: [userRoles.roleId],
+    references: [roles.id],
+  }),
+}));
+
 export const sellersRelations = relations(sellers, ({ many }) => ({
   products: many(products),
   orders: many(orders),
@@ -132,19 +178,23 @@ export const categoriesRelations = relations(categories, ({ many }) => ({
   products: many(products),
 }));
 
-// Zod schemas for validation
+// ========== ZOD SCHEMAS ==========
+
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
-// ⚠️ DO NOT USE WITH USER INPUT
+
 export const insertSellerSchema = createInsertSchema(sellers).omit({ 
   id: true, 
+  commissionRate: true,
   appliedAt: true, 
   reviewedAt: true, 
   reviewedBy: true, 
   rejectionReason: true,
   createdAt: true, 
-  updatedAt: true 
+  updatedAt: true,
+  deletedAt: true,
 });
-export const insertProductSchema = createInsertSchema(products).omit({ id: true, createdAt: true, updatedAt: true });
+
+export const insertProductSchema = createInsertSchema(products).omit({ id: true, createdAt: true, updatedAt: true, deletedAt: true });
 
 export const createProductSchema = z.object({
   name: z.string().min(2, "Product name is required"),
@@ -173,7 +223,8 @@ export const updateProductSchema = z.object({
   images: z.array(z.string()).min(1, "At least one image is required").max(5, "Maximum 5 images allowed").optional(),
   isAvailable: z.boolean().optional(),
 });
-export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, orderNumber: true, createdAt: true, updatedAt: true });
+
+export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, orderNumber: true, createdAt: true, updatedAt: true, deletedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
 
 export const createOrderSchema = z.object({
@@ -191,7 +242,6 @@ export const createOrderSchema = z.object({
   })).min(1),
 });
 
-// Seller application schema (only fields submitted by applicants)
 export const sellerApplicationSchema = z.object({
   businessName: z.string().min(2, "Business name is required"),
   businessNameAr: z.string().nullable().optional(),
@@ -202,7 +252,8 @@ export const sellerApplicationSchema = z.object({
 
 export type SellerApplication = z.infer<typeof sellerApplicationSchema>;
 
-// Types
+// ========== TYPES ==========
+
 export type Category = typeof categories.$inferSelect;
 export type InsertCategory = z.infer<typeof insertCategorySchema>;
 
@@ -220,6 +271,14 @@ export type InsertOrder = z.infer<typeof insertOrderSchema>;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
 
-// Extended types for API responses
+export type Role = typeof roles.$inferSelect;
+export type InsertRole = typeof roles.$inferInsert;
+
+export type UserRole = typeof userRoles.$inferSelect;
+export type InsertUserRole = typeof userRoles.$inferInsert;
+
+export type AdminAction = typeof adminActions.$inferSelect;
+export type InsertAdminAction = typeof adminActions.$inferInsert;
+
 export type ProductWithSeller = Product & { seller: Seller; category: Category };
 export type OrderWithItems = Order & { items: OrderItem[]; seller: Seller };

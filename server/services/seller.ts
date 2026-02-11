@@ -8,11 +8,38 @@ export class SellerApplicationError extends Error {
   }
 }
 
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  pending: ["approved", "rejected"],
+  approved: ["suspended"],
+  rejected: ["pending"],
+  suspended: ["approved"],
+};
+
+function assertTransition(currentStatus: string, targetStatus: string) {
+  const allowed = VALID_TRANSITIONS[currentStatus];
+  if (!allowed || !allowed.includes(targetStatus)) {
+    throw new SellerApplicationError(
+      `Cannot transition from "${currentStatus}" to "${targetStatus}".`,
+      "INVALID_STATUS_TRANSITION"
+    );
+  }
+}
+
 export async function applyToBecomeSeller(
   userId: string,
   application: SellerApplication
 ): Promise<Seller> {
   const existingSeller = await storage.getSellerByUserId(userId);
+  
+  if (existingSeller && existingSeller.status === "rejected") {
+    assertTransition("rejected", "pending");
+    const updated = await storage.updateSellerStatus(existingSeller.id, "pending");
+    if (!updated) {
+      throw new SellerApplicationError("Failed to re-apply", "UPDATE_FAILED");
+    }
+    return updated;
+  }
+  
   if (existingSeller) {
     throw new SellerApplicationError(
       "You already have a seller application",
@@ -42,12 +69,7 @@ export async function approveSeller(
     throw new SellerApplicationError("Seller not found", "NOT_FOUND");
   }
 
-  if (seller.status !== "pending") {
-    throw new SellerApplicationError(
-      `Cannot approve seller with status "${seller.status}". Only pending applications can be approved.`,
-      "INVALID_STATUS_TRANSITION"
-    );
-  }
+  assertTransition(seller.status, "approved");
 
   const updatedSeller = await storage.updateSellerReview(sellerId, {
     status: "approved",
@@ -72,12 +94,7 @@ export async function rejectSeller(
     throw new SellerApplicationError("Seller not found", "NOT_FOUND");
   }
 
-  if (seller.status !== "pending") {
-    throw new SellerApplicationError(
-      `Cannot reject seller with status "${seller.status}". Only pending applications can be rejected.`,
-      "INVALID_STATUS_TRANSITION"
-    );
-  }
+  assertTransition(seller.status, "rejected");
 
   if (!reason || reason.trim().length === 0) {
     throw new SellerApplicationError(
@@ -91,6 +108,32 @@ export async function rejectSeller(
     reviewedAt: new Date(),
     reviewedBy: adminUserId,
     rejectionReason: reason.trim(),
+  });
+
+  if (!updatedSeller) {
+    throw new SellerApplicationError("Failed to update seller", "UPDATE_FAILED");
+  }
+
+  return updatedSeller;
+}
+
+export async function suspendSeller(
+  sellerId: string,
+  adminUserId: string,
+  reason?: string
+): Promise<Seller> {
+  const seller = await storage.getSellerById(sellerId);
+  if (!seller) {
+    throw new SellerApplicationError("Seller not found", "NOT_FOUND");
+  }
+
+  assertTransition(seller.status, "suspended");
+
+  const updatedSeller = await storage.updateSellerReview(sellerId, {
+    status: "suspended",
+    reviewedAt: new Date(),
+    reviewedBy: adminUserId,
+    rejectionReason: reason?.trim() || null,
   });
 
   if (!updatedSeller) {

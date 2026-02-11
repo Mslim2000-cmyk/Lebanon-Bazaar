@@ -1,4 +1,4 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   type User, type InsertUser,
@@ -7,37 +7,35 @@ import {
   type Product, type InsertProduct,
   type Order, type InsertOrder,
   type OrderItem, type InsertOrderItem,
+  type AdminAction, type InsertAdminAction,
   categories, sellers, products, orders, orderItems,
-  users
+  users, roles, userRoles, adminActions,
 } from "@shared/schema";
 
 export interface IStorage {
-  // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   
-  // Categories
   getCategories(): Promise<Category[]>;
   getCategoryById(id: string): Promise<Category | undefined>;
   getCategoryBySlug(slug: string): Promise<Category | undefined>;
   createCategory(category: InsertCategory): Promise<Category>;
   
-  // Sellers
-  getSellers(): Promise<Seller[]>;
+  getSellers(opts?: { includeDeleted?: boolean }): Promise<Seller[]>;
   getApprovedSellers(): Promise<Seller[]>;
   getSellerById(id: string): Promise<Seller | undefined>;
   getSellerByUserId(userId: string): Promise<Seller | undefined>;
   createSeller(seller: InsertSeller): Promise<Seller>;
   updateSellerStatus(id: string, status: string): Promise<Seller | undefined>;
   updateSellerReview(id: string, reviewData: { 
-    status: "approved" | "rejected"; 
+    status: "approved" | "rejected" | "suspended"; 
     reviewedAt: Date; 
     reviewedBy: string; 
     rejectionReason?: string | null;
   }): Promise<Seller | undefined>;
+  softDeleteSeller(id: string): Promise<Seller | undefined>;
   
-  // Products
   getProducts(): Promise<Product[]>;
   getAvailableProducts(): Promise<(Product & { seller: Seller; category: Category })[]>;
   getFeaturedProducts(): Promise<(Product & { seller: Seller; category: Category })[]>;
@@ -46,24 +44,32 @@ export interface IStorage {
   getProductsByCategory(categoryId: string): Promise<(Product & { seller: Seller; category: Category })[]>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product | undefined>;
+  softDeleteProduct(id: string): Promise<Product | undefined>;
   
-  // Orders
-  getOrders(): Promise<Order[]>;
+  getOrders(opts?: { includeDeleted?: boolean }): Promise<Order[]>;
   getOrderById(id: string): Promise<(Order & { items: OrderItem[] }) | undefined>;
   getOrdersBySeller(sellerId: string): Promise<Order[]>;
   createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<Order>;
   updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
+  softDeleteOrder(id: string): Promise<Order | undefined>;
+
+  userHasRole(userId: string, roleName: string): Promise<boolean>;
+  getUserRoles(userId: string): Promise<string[]>;
+  assignRoleToUser(userId: string, roleName: string): Promise<void>;
+
+  logAdminAction(action: InsertAdminAction): Promise<AdminAction>;
+  getAdminActions(opts?: { limit?: number; offset?: number }): Promise<AdminAction[]>;
 }
 
 export class DatabaseStorage implements IStorage {
-  // Users
+  // ========== USERS ==========
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
+    const [user] = await db.select().from(users).where(eq(users.email, username));
     return user;
   }
 
@@ -72,7 +78,7 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  // Categories
+  // ========== CATEGORIES ==========
   async getCategories(): Promise<Category[]> {
     return await db.select().from(categories);
   }
@@ -92,24 +98,30 @@ export class DatabaseStorage implements IStorage {
     return newCategory;
   }
 
-  // Sellers
-  async getSellers(): Promise<Seller[]> {
+  // ========== SELLERS (soft-delete aware) ==========
+  async getSellers(opts?: { includeDeleted?: boolean }): Promise<Seller[]> {
+    const conditions = opts?.includeDeleted ? [] : [isNull(sellers.deletedAt)];
+    if (conditions.length > 0) {
+      return await db.select().from(sellers).where(and(...conditions)).orderBy(desc(sellers.createdAt));
+    }
     return await db.select().from(sellers).orderBy(desc(sellers.createdAt));
   }
 
   async getApprovedSellers(): Promise<Seller[]> {
     return await db.select().from(sellers)
-      .where(eq(sellers.status, "approved"))
+      .where(and(eq(sellers.status, "approved"), isNull(sellers.deletedAt)))
       .orderBy(desc(sellers.createdAt));
   }
 
   async getSellerById(id: string): Promise<Seller | undefined> {
-    const [seller] = await db.select().from(sellers).where(eq(sellers.id, id));
+    const [seller] = await db.select().from(sellers)
+      .where(and(eq(sellers.id, id), isNull(sellers.deletedAt)));
     return seller;
   }
 
   async getSellerByUserId(userId: string): Promise<Seller | undefined> {
-    const [seller] = await db.select().from(sellers).where(eq(sellers.ownerUserId, userId));
+    const [seller] = await db.select().from(sellers)
+      .where(and(eq(sellers.ownerUserId, userId), isNull(sellers.deletedAt)));
     return seller;
   }
 
@@ -121,13 +133,13 @@ export class DatabaseStorage implements IStorage {
   async updateSellerStatus(id: string, status: string): Promise<Seller | undefined> {
     const [updatedSeller] = await db.update(sellers)
       .set({ status: status as any, updatedAt: new Date() })
-      .where(eq(sellers.id, id))
+      .where(and(eq(sellers.id, id), isNull(sellers.deletedAt)))
       .returning();
     return updatedSeller;
   }
 
   async updateSellerReview(id: string, reviewData: { 
-    status: "approved" | "rejected"; 
+    status: "approved" | "rejected" | "suspended"; 
     reviewedAt: Date; 
     reviewedBy: string; 
     rejectionReason?: string | null;
@@ -140,14 +152,24 @@ export class DatabaseStorage implements IStorage {
         rejectionReason: reviewData.rejectionReason || null,
         updatedAt: new Date() 
       })
-      .where(eq(sellers.id, id))
+      .where(and(eq(sellers.id, id), isNull(sellers.deletedAt)))
       .returning();
     return updatedSeller;
   }
 
-  // Products
+  async softDeleteSeller(id: string): Promise<Seller | undefined> {
+    const [deleted] = await db.update(sellers)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(sellers.id, id), isNull(sellers.deletedAt)))
+      .returning();
+    return deleted;
+  }
+
+  // ========== PRODUCTS (soft-delete aware) ==========
   async getProducts(): Promise<Product[]> {
-    return await db.select().from(products).orderBy(desc(products.createdAt));
+    return await db.select().from(products)
+      .where(isNull(products.deletedAt))
+      .orderBy(desc(products.createdAt));
   }
 
   async getAvailableProducts(): Promise<(Product & { seller: Seller; category: Category })[]> {
@@ -161,7 +183,9 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(categories, eq(products.categoryId, categories.id))
       .where(and(
         eq(products.isAvailable, true),
-        eq(sellers.status, "approved")
+        eq(sellers.status, "approved"),
+        isNull(products.deletedAt),
+        isNull(sellers.deletedAt),
       ))
       .orderBy(desc(products.createdAt));
     
@@ -184,7 +208,9 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(products.isAvailable, true),
         eq(products.isFeatured, true),
-        eq(sellers.status, "approved")
+        eq(sellers.status, "approved"),
+        isNull(products.deletedAt),
+        isNull(sellers.deletedAt),
       ))
       .orderBy(desc(products.createdAt));
     
@@ -204,7 +230,7 @@ export class DatabaseStorage implements IStorage {
       .from(products)
       .innerJoin(sellers, eq(products.sellerId, sellers.id))
       .innerJoin(categories, eq(products.categoryId, categories.id))
-      .where(eq(products.id, id));
+      .where(and(eq(products.id, id), isNull(products.deletedAt)));
     
     if (!result) return undefined;
     return {
@@ -221,7 +247,7 @@ export class DatabaseStorage implements IStorage {
     })
       .from(products)
       .innerJoin(categories, eq(products.categoryId, categories.id))
-      .where(eq(products.sellerId, sellerId))
+      .where(and(eq(products.sellerId, sellerId), isNull(products.deletedAt)))
       .orderBy(desc(products.createdAt));
     
     return result.map(r => ({
@@ -242,7 +268,9 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(products.categoryId, categoryId),
         eq(products.isAvailable, true),
-        eq(sellers.status, "approved")
+        eq(sellers.status, "approved"),
+        isNull(products.deletedAt),
+        isNull(sellers.deletedAt),
       ))
       .orderBy(desc(products.createdAt));
     
@@ -261,18 +289,31 @@ export class DatabaseStorage implements IStorage {
   async updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product | undefined> {
     const [updatedProduct] = await db.update(products)
       .set({ ...product, updatedAt: new Date() })
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), isNull(products.deletedAt)))
       .returning();
     return updatedProduct;
   }
 
-  // Orders
-  async getOrders(): Promise<Order[]> {
+  async softDeleteProduct(id: string): Promise<Product | undefined> {
+    const [deleted] = await db.update(products)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(products.id, id), isNull(products.deletedAt)))
+      .returning();
+    return deleted;
+  }
+
+  // ========== ORDERS (soft-delete aware) ==========
+  async getOrders(opts?: { includeDeleted?: boolean }): Promise<Order[]> {
+    const conditions = opts?.includeDeleted ? [] : [isNull(orders.deletedAt)];
+    if (conditions.length > 0) {
+      return await db.select().from(orders).where(and(...conditions)).orderBy(desc(orders.createdAt));
+    }
     return await db.select().from(orders).orderBy(desc(orders.createdAt));
   }
 
   async getOrderById(id: string): Promise<(Order & { items: OrderItem[] }) | undefined> {
-    const [order] = await db.select().from(orders).where(eq(orders.id, id));
+    const [order] = await db.select().from(orders)
+      .where(and(eq(orders.id, id), isNull(orders.deletedAt)));
     if (!order) return undefined;
     
     const items = await db.select().from(orderItems).where(eq(orderItems.orderId, id));
@@ -281,7 +322,7 @@ export class DatabaseStorage implements IStorage {
 
   async getOrdersBySeller(sellerId: string): Promise<Order[]> {
     return await db.select().from(orders)
-      .where(eq(orders.sellerId, sellerId))
+      .where(and(eq(orders.sellerId, sellerId), isNull(orders.deletedAt)))
       .orderBy(desc(orders.createdAt));
   }
 
@@ -304,9 +345,57 @@ export class DatabaseStorage implements IStorage {
   async updateOrderStatus(id: string, status: string): Promise<Order | undefined> {
     const [updatedOrder] = await db.update(orders)
       .set({ status: status as any, updatedAt: new Date() })
-      .where(eq(orders.id, id))
+      .where(and(eq(orders.id, id), isNull(orders.deletedAt)))
       .returning();
     return updatedOrder;
+  }
+
+  async softDeleteOrder(id: string): Promise<Order | undefined> {
+    const [deleted] = await db.update(orders)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(orders.id, id), isNull(orders.deletedAt)))
+      .returning();
+    return deleted;
+  }
+
+  // ========== RBAC ==========
+  async userHasRole(userId: string, roleName: string): Promise<boolean> {
+    const [result] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(userRoles)
+      .innerJoin(roles, eq(userRoles.roleId, roles.id))
+      .where(and(eq(userRoles.userId, userId), eq(roles.name, roleName)));
+    return (result?.count ?? 0) > 0;
+  }
+
+  async getUserRoles(userId: string): Promise<string[]> {
+    const result = await db.select({ name: roles.name })
+      .from(userRoles)
+      .innerJoin(roles, eq(userRoles.roleId, roles.id))
+      .where(eq(userRoles.userId, userId));
+    return result.map(r => r.name);
+  }
+
+  async assignRoleToUser(userId: string, roleName: string): Promise<void> {
+    const [role] = await db.select().from(roles).where(eq(roles.name, roleName));
+    if (!role) return;
+    await db.insert(userRoles)
+      .values({ userId, roleId: role.id })
+      .onConflictDoNothing();
+  }
+
+  // ========== AUDIT LOGGING ==========
+  async logAdminAction(action: InsertAdminAction): Promise<AdminAction> {
+    const [logged] = await db.insert(adminActions).values(action).returning();
+    return logged;
+  }
+
+  async getAdminActions(opts?: { limit?: number; offset?: number }): Promise<AdminAction[]> {
+    const limit = opts?.limit ?? 50;
+    const offset = opts?.offset ?? 0;
+    return await db.select().from(adminActions)
+      .orderBy(desc(adminActions.createdAt))
+      .limit(limit)
+      .offset(offset);
   }
 }
 
