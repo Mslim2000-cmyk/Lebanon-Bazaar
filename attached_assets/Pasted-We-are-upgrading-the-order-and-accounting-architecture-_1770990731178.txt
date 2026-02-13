@@ -1,0 +1,176 @@
+We are upgrading the order and accounting architecture to properly support COD marketplace logic.
+
+This is NOT optional refactoring.
+We are introducing a real seller balance system and enforcing payment state integrity.
+
+Follow these instructions strictly.
+
+1️⃣ Update Payment Status Enum
+
+Replace current payment_status enum:
+
+Current:
+["pending", "confirmed", "failed"]
+
+Replace with:
+["pending", "collected", "failed", "refunded"]
+
+Do NOT keep "confirmed".
+
+Run migration.
+
+2️⃣ Create seller_balances Table
+
+Create new table:
+
+seller_balances
+
+Columns:
+
+seller_id (PK, references sellers.id, cascade delete)
+
+pending_usd (decimal 10,2) default 0.00 not null
+
+available_usd (decimal 10,2) default 0.00 not null
+
+updated_at timestamp default now()
+
+Add index on seller_id.
+
+On seller creation, auto-create seller_balance row.
+
+3️⃣ Make createOrder Fully Transactional
+
+Wrap createOrder logic inside DB transaction.
+
+Steps inside transaction:
+
+Insert order
+
+Insert order items
+
+If paymentMethod === 'cod':
+
+Calculate sellerNet = subtotal - commissionAmount
+
+Increase seller_balances.pending_usd by sellerNet
+
+If any step fails → rollback everything.
+
+4️⃣ Enforce Order State Machine
+
+We must not allow random status changes.
+
+Allowed transitions:
+
+pending → confirmed
+confirmed → shipped
+shipped → delivered
+pending → cancelled
+confirmed → cancelled
+
+No other transitions allowed.
+
+Create service-layer function:
+
+updateOrderWithStateMachine(orderId, newStatus)
+
+This function must:
+
+Fetch current order
+
+Validate allowed transition
+
+If invalid → throw error
+
+If valid → update order
+
+Do NOT allow direct updateOrderStatus usage anymore.
+
+5️⃣ Delivery Logic (CRITICAL)
+
+Inside updateOrderWithStateMachine:
+
+If newStatus === "delivered" AND paymentMethod === "cod":
+
+Set paymentStatus = "collected"
+
+Move seller_balances:
+pending_usd -= sellerNet
+available_usd += sellerNet
+
+If newStatus === "cancelled" AND paymentMethod === "cod":
+
+Set paymentStatus = "failed"
+
+Reverse pending:
+pending_usd -= sellerNet
+
+All balance updates must happen inside transaction.
+
+6️⃣ Add sellerNet Snapshot To Orders
+
+We must not recalculate later.
+
+Add new column to orders:
+
+seller_net_usd decimal(10,2) not null
+
+Set it at order creation.
+
+Do NOT compute from subtotal later.
+
+Run migration.
+
+7️⃣ Prevent Negative Balance
+
+When decreasing pending_usd:
+Ensure it never goes below 0.
+Throw if inconsistency detected.
+
+8️⃣ Add Seller Balance Fetch Endpoint
+
+Create route:
+
+GET /api/seller/balance
+
+Return:
+{
+pendingUsd,
+availableUsd
+}
+
+Protected by seller role.
+
+9️⃣ Remove Any Hardcoded Commission Logic
+
+Commission must always be calculated from:
+sellers.commissionRate
+
+Never hardcode 10%.
+
+10️⃣ Final Integrity Rules
+
+All balance mutations must be transactional.
+
+No direct DB updates outside service layer.
+
+No silent failures.
+
+No skipped transitions.
+
+After implementation:
+
+Provide:
+
+Updated schema
+
+Migration diff
+
+Updated order service
+
+New balance service
+
+Updated routes
+
+Do not partially implement.
