@@ -9,7 +9,7 @@ export * from "./models/auth";
 export const sellerStatusEnum = pgEnum("seller_status", ["pending", "approved", "rejected", "suspended"]);
 export const orderStatusEnum = pgEnum("order_status", ["pending", "confirmed", "shipped", "delivered", "cancelled"]);
 export const paymentMethodEnum = pgEnum("payment_method", ["cod"]);
-export const paymentStatusEnum = pgEnum("payment_status", ["pending", "confirmed", "failed"]);
+export const paymentStatusEnum = pgEnum("payment_status", ["pending", "collected", "failed", "refunded"]);
 
 // ========== RBAC TABLES ==========
 
@@ -109,12 +109,24 @@ export const orders = pgTable("orders", {
   paymentStatus: paymentStatusEnum("payment_status").default("pending").notNull(),
   subtotalUsd: decimal("subtotal_usd", { precision: 10, scale: 2 }).notNull(),
   commissionUsd: decimal("commission_usd", { precision: 10, scale: 2 }).notNull(),
+  sellerNetUsd: decimal("seller_net_usd", { precision: 10, scale: 2 }).notNull(),
   totalUsd: decimal("total_usd", { precision: 10, scale: 2 }).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
   deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("orders_seller_id_idx").on(table.sellerId),
+]);
+
+// ========== SELLER BALANCES ==========
+
+export const sellerBalances = pgTable("seller_balances", {
+  sellerId: varchar("seller_id").primaryKey().references(() => sellers.id, { onDelete: "cascade" }),
+  pendingUsd: decimal("pending_usd", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  availableUsd: decimal("available_usd", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("seller_balances_seller_id_idx").on(table.sellerId),
 ]);
 
 export const orderItems = pgTable("order_items", {
@@ -139,9 +151,17 @@ export const userRolesRelations = relations(userRoles, ({ one }) => ({
   }),
 }));
 
-export const sellersRelations = relations(sellers, ({ many }) => ({
+export const sellerBalancesRelations = relations(sellerBalances, ({ one }) => ({
+  seller: one(sellers, {
+    fields: [sellerBalances.sellerId],
+    references: [sellers.id],
+  }),
+}));
+
+export const sellersRelations = relations(sellers, ({ many, one }) => ({
   products: many(products),
   orders: many(orders),
+  balance: one(sellerBalances),
 }));
 
 export const productsRelations = relations(products, ({ one }) => ({
@@ -224,7 +244,7 @@ export const updateProductSchema = z.object({
   isAvailable: z.boolean().optional(),
 });
 
-export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, orderNumber: true, createdAt: true, updatedAt: true, deletedAt: true });
+export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, orderNumber: true, sellerNetUsd: true, createdAt: true, updatedAt: true, deletedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
 
 export const createOrderSchema = z.object({
@@ -279,6 +299,9 @@ export type InsertUserRole = typeof userRoles.$inferInsert;
 
 export type AdminAction = typeof adminActions.$inferSelect;
 export type InsertAdminAction = typeof adminActions.$inferInsert;
+
+export type SellerBalance = typeof sellerBalances.$inferSelect;
+export type InsertSellerBalance = typeof sellerBalances.$inferInsert;
 
 export type ProductWithSeller = Product & { seller: Seller; category: Category };
 export type OrderWithItems = Order & { items: OrderItem[]; seller: Seller };

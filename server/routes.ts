@@ -16,6 +16,7 @@ import {
   suspendSeller,
   SellerApplicationError 
 } from "./services/seller";
+import { createOrderTransactional, updateOrderWithStateMachine, OrderError } from "./services/order";
 import { requireApprovedSeller, ForbiddenError } from "./utils/guards";
 
 function getUser(req: Request) {
@@ -118,6 +119,16 @@ export async function registerRoutes(
     const seller = await requireApprovedSeller(user.id);
     const sellerOrders = await storage.getOrdersBySeller(seller.id);
     res.json(sellerOrders);
+  }));
+
+  app.get("/api/sellers/me/balance", requireAuth, asyncHandler(async (req, res) => {
+    const user = getUser(req)!;
+    const seller = await requireApprovedSeller(user.id);
+    const balance = await storage.getSellerBalance(seller.id);
+    if (!balance) {
+      return res.status(404).json({ error: "Balance not found" });
+    }
+    res.json(balance);
   }));
 
   app.get("/api/sellers/:id", asyncHandler(async (req, res) => {
@@ -292,6 +303,7 @@ export async function registerRoutes(
     
     const commissionRate = Number(seller.commissionRate);
     const commission = subtotal * commissionRate;
+    const sellerNet = subtotal - commission;
     const total = subtotal;
     
     const orderData = {
@@ -303,13 +315,14 @@ export async function registerRoutes(
       deliveryNotes: data.deliveryNotes || null,
       subtotalUsd: subtotal.toFixed(2),
       commissionUsd: commission.toFixed(2),
+      sellerNetUsd: sellerNet.toFixed(2),
       totalUsd: total.toFixed(2),
       status: "pending" as const,
       paymentMethod: "cod" as const,
       paymentStatus: "pending" as const,
     };
     
-    const order = await storage.createOrder(orderData, validatedItems);
+    const order = await createOrderTransactional(orderData, validatedItems);
     res.status(201).json(order);
   }));
 
@@ -317,22 +330,25 @@ export async function registerRoutes(
     const user = getUser(req)!;
     const seller = await requireApprovedSeller(user.id);
     
-    const order = await storage.getOrderById(req.params.id);
-    if (!order) {
+    const existingOrder = await storage.getOrderById(req.params.id);
+    if (!existingOrder) {
       return res.status(404).json({ error: "Order not found" });
     }
-    if (order.sellerId !== seller.id) {
+    if (existingOrder.sellerId !== seller.id) {
       return res.status(403).json({ error: "Access denied" });
     }
     
     const { status } = req.body;
-    const validStatuses = ["pending", "confirmed", "shipped", "delivered", "cancelled"];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: "Invalid status" });
+    try {
+      const updatedOrder = await updateOrderWithStateMachine(req.params.id, status);
+      res.json(updatedOrder);
+    } catch (err) {
+      if (err instanceof OrderError) {
+        const statusCode = err.code === "SAME_STATUS" || err.code === "INVALID_STATUS_TRANSITION" ? 400 : 500;
+        return res.status(statusCode).json({ error: err.message, code: err.code });
+      }
+      throw err;
     }
-    
-    const updatedOrder = await storage.updateOrderStatus(req.params.id, status);
-    res.json(updatedOrder);
   }));
 
   // ========== ADMIN ROUTES ==========

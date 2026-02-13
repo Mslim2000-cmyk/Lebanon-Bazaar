@@ -8,8 +8,9 @@ import {
   type Order, type InsertOrder,
   type OrderItem, type InsertOrderItem,
   type AdminAction, type InsertAdminAction,
+  type SellerBalance,
   categories, sellers, products, orders, orderItems,
-  users, roles, userRoles, adminActions,
+  users, roles, userRoles, adminActions, sellerBalances,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -49,9 +50,9 @@ export interface IStorage {
   getOrders(opts?: { includeDeleted?: boolean }): Promise<Order[]>;
   getOrderById(id: string): Promise<(Order & { items: OrderItem[] }) | undefined>;
   getOrdersBySeller(sellerId: string): Promise<Order[]>;
-  createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<Order>;
-  updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
   softDeleteOrder(id: string): Promise<Order | undefined>;
+
+  getSellerBalance(sellerId: string): Promise<SellerBalance | undefined>;
 
   userHasRole(userId: string, roleName: string): Promise<boolean>;
   getUserRoles(userId: string): Promise<string[]>;
@@ -127,6 +128,9 @@ export class DatabaseStorage implements IStorage {
 
   async createSeller(seller: InsertSeller): Promise<Seller> {
     const [newSeller] = await db.insert(sellers).values(seller).returning();
+    await db.insert(sellerBalances)
+      .values({ sellerId: newSeller.id })
+      .onConflictDoNothing();
     return newSeller;
   }
 
@@ -326,36 +330,19 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(orders.createdAt));
   }
 
-  async createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<Order> {
-    const orderNumber = `SA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-    
-    const [newOrder] = await db.insert(orders)
-      .values({ ...order, orderNumber })
-      .returning();
-    
-    if (items.length > 0) {
-      await db.insert(orderItems).values(
-        items.map(item => ({ ...item, orderId: newOrder.id }))
-      );
-    }
-    
-    return newOrder;
-  }
-
-  async updateOrderStatus(id: string, status: string): Promise<Order | undefined> {
-    const [updatedOrder] = await db.update(orders)
-      .set({ status: status as any, updatedAt: new Date() })
-      .where(and(eq(orders.id, id), isNull(orders.deletedAt)))
-      .returning();
-    return updatedOrder;
-  }
-
   async softDeleteOrder(id: string): Promise<Order | undefined> {
     const [deleted] = await db.update(orders)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(orders.id, id), isNull(orders.deletedAt)))
       .returning();
     return deleted;
+  }
+
+  // ========== SELLER BALANCES ==========
+  async getSellerBalance(sellerId: string): Promise<SellerBalance | undefined> {
+    const [balance] = await db.select().from(sellerBalances)
+      .where(eq(sellerBalances.sellerId, sellerId));
+    return balance;
   }
 
   // ========== RBAC ==========

@@ -10,6 +10,7 @@ A marketplace connecting Lebanese artisans with local consumers. Features Cash o
 - `storage.ts` - Database operations using Drizzle ORM with PostgreSQL (includes RBAC, soft-delete, audit logging)
 - `seed.ts` - Seeds initial categories on startup
 - `services/seller.ts` - Seller state machine (pending→approved/rejected, approved→suspended, suspended→approved, rejected→pending re-apply)
+- `services/order.ts` - Order state machine + transactional order creation with atomic balance updates
 - `utils/guards.ts` - Auth guards (requireApprovedSeller, ForbiddenError)
 - `replit_integrations/auth/` - Replit Auth integration (auto-assigns 'user' role on signup)
 - `replit_integrations/object_storage/` - Object storage for product images
@@ -59,6 +60,20 @@ A marketplace connecting Lebanese artisans with local consumers. Features Cash o
 - Valid transitions: pending→approved, pending→rejected, approved→suspended, suspended→approved, rejected→pending (re-apply)
 - Enforced in `server/services/seller.ts` via `VALID_TRANSITIONS` map
 - Re-apply: rejected sellers can submit new application, transitions back to pending
+
+### Order State Machine & Accounting
+- Valid transitions: pending→confirmed/cancelled, confirmed→shipped/cancelled, shipped→delivered; delivered/cancelled are terminal
+- Enforced in `server/services/order.ts` via `ALLOWED_TRANSITIONS` map
+- Same-status guard: throws SAME_STATUS error if order.status === newStatus
+- `seller_net_usd` snapshot stored at order creation (subtotal - commission), sole value for all balance movements
+- `seller_balances` table: pending_usd (funds in transit), available_usd (funds cleared)
+- Balance auto-created on seller creation via `createSeller` in storage.ts
+- Transactional order creation: `createOrderTransactional` atomically inserts order + items + increments seller pending balance
+- On delivered + COD: paymentStatus→collected, atomic move pending→available (using seller_net_usd)
+- On cancelled + COD (paymentStatus=pending): paymentStatus→failed, atomic reverse pending
+- Negative balance guard: WHERE pending_usd >= amount prevents negative balances
+- All balance mutations use row-level SQL arithmetic (no read-then-write races)
+- `GET /api/sellers/me/balance` returns authenticated seller's balance
 
 ### Pagination
 - Admin routes return `{ data, total, page, limit }` format
