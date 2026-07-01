@@ -110,7 +110,7 @@ export default function BecomeSeller() {
               Join our community of talented Lebanese artisans. Share your craft with customers across Lebanon.
             </p>
             <Button size="lg" asChild>
-              <a href="/api/login" data-testid="button-login-to-sell">
+              <a href="/login" data-testid="button-login-to-sell">
                 Sign In to Get Started
               </a>
             </Button>

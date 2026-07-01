@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useState } from "react";
 
 export function Header() {
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isAdmin, isLoading, logout } = useAuth();
   const [location] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -98,7 +98,7 @@ export function Header() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          
+
           <Link href="/cart">
             <Button variant="ghost" size="icon" data-testid="button-cart">
               <ShoppingBag className="h-5 w-5" />
@@ -114,24 +114,36 @@ export function Header() {
                   <Store className="h-5 w-5" />
                 </Button>
               </Link>
-              <Link href="/admin">
-                <Button variant="ghost" size="icon" data-testid="button-admin">
-                  <LayoutDashboard className="h-5 w-5" />
+              {isAdmin && (
+                <Link href="/admin">
+                  <Button variant="ghost" size="icon" data-testid="button-admin">
+                    <LayoutDashboard className="h-5 w-5" />
+                  </Button>
+                </Link>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={logout}
+                data-testid="button-logout"
+              >
+                Logout
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Link href="/login">
+                <Button variant="outline" size="sm" data-testid="button-login">
+                  Sign In
                 </Button>
               </Link>
-              <Link href="/api/logout">
-                <Button variant="outline" size="sm" data-testid="button-logout">
-                  Logout
+              <Link href="/register">
+                <Button size="sm" data-testid="button-register">
+                  <User className="mr-2 h-4 w-4" />
+                  Register
                 </Button>
               </Link>
             </div>
-          ) : (
-            <Link href="/api/login">
-              <Button data-testid="button-login">
-                <User className="mr-2 h-4 w-4" />
-                Sign In
-              </Button>
-            </Link>
           )}
         </div>
       </div>

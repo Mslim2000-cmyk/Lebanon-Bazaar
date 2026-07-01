@@ -15,28 +15,28 @@ import {
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  
+
   getCategories(): Promise<Category[]>;
   getCategoryById(id: string): Promise<Category | undefined>;
   getCategoryBySlug(slug: string): Promise<Category | undefined>;
   createCategory(category: InsertCategory): Promise<Category>;
-  
+
   getSellers(opts?: { includeDeleted?: boolean }): Promise<Seller[]>;
   getApprovedSellers(): Promise<Seller[]>;
   getSellerById(id: string): Promise<Seller | undefined>;
   getSellerByUserId(userId: string): Promise<Seller | undefined>;
   createSeller(seller: InsertSeller): Promise<Seller>;
   updateSellerStatus(id: string, status: string): Promise<Seller | undefined>;
-  updateSellerReview(id: string, reviewData: { 
-    status: "approved" | "rejected" | "suspended"; 
-    reviewedAt: Date; 
-    reviewedBy: string; 
+  updateSellerReview(id: string, reviewData: {
+    status: "approved" | "rejected" | "suspended";
+    reviewedAt: Date;
+    reviewedBy: string;
     rejectionReason?: string | null;
   }): Promise<Seller | undefined>;
   softDeleteSeller(id: string): Promise<Seller | undefined>;
-  
+
   getProducts(): Promise<Product[]>;
   getAvailableProducts(): Promise<(Product & { seller: Seller; category: Category })[]>;
   getFeaturedProducts(): Promise<(Product & { seller: Seller; category: Category })[]>;
@@ -46,7 +46,7 @@ export interface IStorage {
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product | undefined>;
   softDeleteProduct(id: string): Promise<Product | undefined>;
-  
+
   getOrders(opts?: { includeDeleted?: boolean }): Promise<Order[]>;
   getOrderById(id: string): Promise<(Order & { items: OrderItem[] }) | undefined>;
   getOrdersBySeller(sellerId: string): Promise<Order[]>;
@@ -56,6 +56,7 @@ export interface IStorage {
 
   userHasRole(userId: string, roleName: string): Promise<boolean>;
   getUserRoles(userId: string): Promise<string[]>;
+  ensureRole(roleName: string, description?: string): Promise<void>;
   assignRoleToUser(userId: string, roleName: string): Promise<void>;
 
   logAdminAction(action: InsertAdminAction): Promise<AdminAction>;
@@ -69,8 +70,8 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, username));
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
     return user;
   }
 
@@ -142,19 +143,19 @@ export class DatabaseStorage implements IStorage {
     return updatedSeller;
   }
 
-  async updateSellerReview(id: string, reviewData: { 
-    status: "approved" | "rejected" | "suspended"; 
-    reviewedAt: Date; 
-    reviewedBy: string; 
+  async updateSellerReview(id: string, reviewData: {
+    status: "approved" | "rejected" | "suspended";
+    reviewedAt: Date;
+    reviewedBy: string;
     rejectionReason?: string | null;
   }): Promise<Seller | undefined> {
     const [updatedSeller] = await db.update(sellers)
-      .set({ 
-        status: reviewData.status, 
+      .set({
+        status: reviewData.status,
         reviewedAt: reviewData.reviewedAt,
         reviewedBy: reviewData.reviewedBy,
         rejectionReason: reviewData.rejectionReason || null,
-        updatedAt: new Date() 
+        updatedAt: new Date()
       })
       .where(and(eq(sellers.id, id), isNull(sellers.deletedAt)))
       .returning();
@@ -192,7 +193,7 @@ export class DatabaseStorage implements IStorage {
         isNull(sellers.deletedAt),
       ))
       .orderBy(desc(products.createdAt));
-    
+
     return result.map(r => ({
       ...r.product,
       seller: r.seller,
@@ -217,7 +218,7 @@ export class DatabaseStorage implements IStorage {
         isNull(sellers.deletedAt),
       ))
       .orderBy(desc(products.createdAt));
-    
+
     return result.map(r => ({
       ...r.product,
       seller: r.seller,
@@ -235,7 +236,7 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(sellers, eq(products.sellerId, sellers.id))
       .innerJoin(categories, eq(products.categoryId, categories.id))
       .where(and(eq(products.id, id), isNull(products.deletedAt)));
-    
+
     if (!result) return undefined;
     return {
       ...result.product,
@@ -253,7 +254,7 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(categories, eq(products.categoryId, categories.id))
       .where(and(eq(products.sellerId, sellerId), isNull(products.deletedAt)))
       .orderBy(desc(products.createdAt));
-    
+
     return result.map(r => ({
       ...r.product,
       category: r.category,
@@ -277,7 +278,7 @@ export class DatabaseStorage implements IStorage {
         isNull(sellers.deletedAt),
       ))
       .orderBy(desc(products.createdAt));
-    
+
     return result.map(r => ({
       ...r.product,
       seller: r.seller,
@@ -319,7 +320,7 @@ export class DatabaseStorage implements IStorage {
     const [order] = await db.select().from(orders)
       .where(and(eq(orders.id, id), isNull(orders.deletedAt)));
     if (!order) return undefined;
-    
+
     const items = await db.select().from(orderItems).where(eq(orderItems.orderId, id));
     return { ...order, items };
   }
@@ -360,6 +361,12 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(roles, eq(userRoles.roleId, roles.id))
       .where(eq(userRoles.userId, userId));
     return result.map(r => r.name);
+  }
+
+  async ensureRole(roleName: string, description?: string): Promise<void> {
+    await db.insert(roles)
+      .values({ name: roleName, description: description ?? null })
+      .onConflictDoNothing();
   }
 
   async assignRoleToUser(userId: string, roleName: string): Promise<void> {

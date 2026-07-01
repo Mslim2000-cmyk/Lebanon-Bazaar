@@ -24,24 +24,24 @@ import {
 import type { Seller, Product, Order } from "@shared/schema";
 
 export default function AdminDashboard() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isAdmin, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
 
   const { data: sellers, isLoading: sellersLoading } = useQuery<Seller[]>({
     queryKey: ["/api/admin/sellers"],
-    enabled: isAuthenticated,
+    enabled: isAdmin,
   });
 
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
-    enabled: isAuthenticated,
+    enabled: isAdmin,
   });
 
   const { data: orders, isLoading: ordersLoading } = useQuery<Order[]>({
     queryKey: ["/api/admin/orders"],
-    enabled: isAuthenticated,
+    enabled: isAdmin,
   });
 
   const updateSellerStatusMutation = useMutation({
@@ -58,10 +58,11 @@ export default function AdminDashboard() {
   });
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      setLocation("/api/login");
+    if (!authLoading) {
+      if (!isAuthenticated) setLocation("/login");
+      else if (!isAdmin) setLocation("/");
     }
-  }, [authLoading, isAuthenticated, setLocation]);
+  }, [authLoading, isAuthenticated, isAdmin, setLocation]);
 
   if (authLoading) {
     return (

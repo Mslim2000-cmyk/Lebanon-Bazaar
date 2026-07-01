@@ -152,7 +152,7 @@ export default function ProductForm() {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      setLocation("/api/login");
+      setLocation("/login");
     }
   }, [authLoading, isAuthenticated, setLocation]);
 

@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Seller } from "@shared/schema";
+import { getToken } from "@/hooks/use-auth";
 
 async function fetchSeller(): Promise<Seller | null> {
+  const token = getToken();
   const res = await fetch("/api/sellers/me", {
-    credentials: "include",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 
   if (res.status === 401 || res.status === 404) {

@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 async function main() {
   const userId = process.argv[2];
   if (!userId) {
-    console.error("Usage: npx tsx scripts/assign-admin-role.ts <user_id>");
+    console.error("Usage: npm run assign-admin <user_id>");
     process.exit(1);
   }
 
@@ -15,9 +15,14 @@ async function main() {
     process.exit(1);
   }
 
+  // Ensure admin role exists
+  await db.insert(roles)
+    .values({ name: "admin", description: "Platform administrator" })
+    .onConflictDoNothing();
+
   const [adminRole] = await db.select().from(roles).where(eq(roles.name, "admin"));
   if (!adminRole) {
-    console.error("Admin role not found. Seed roles first.");
+    console.error("Failed to create or find admin role");
     process.exit(1);
   }
 
@@ -25,7 +30,8 @@ async function main() {
     .values({ userId, roleId: adminRole.id })
     .onConflictDoNothing();
 
-  console.log(`Admin role assigned to user ${userId} (${user.email || user.firstName || "unknown"})`);
+  const displayName = user.email ?? user.firstName ?? userId;
+  console.log(`Admin role assigned to user ${userId} (${displayName})`);
   process.exit(0);
 }
 

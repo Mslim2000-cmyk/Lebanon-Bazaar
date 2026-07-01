@@ -99,6 +99,7 @@ export const orders = pgTable("orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull().unique(),
   sellerId: varchar("seller_id").notNull().references(() => sellers.id),
+  buyerUserId: varchar("buyer_user_id"),
   buyerName: text("buyer_name").notNull(),
   buyerPhone: text("buyer_phone").notNull(),
   buyerEmail: text("buyer_email"),
@@ -116,6 +117,7 @@ export const orders = pgTable("orders", {
   deletedAt: timestamp("deleted_at"),
 }, (table) => [
   index("orders_seller_id_idx").on(table.sellerId),
+  index("orders_buyer_user_id_idx").on(table.buyerUserId),
 ]);
 
 // ========== SELLER BALANCES ==========

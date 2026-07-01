@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { categories } from "@shared/schema";
+import { storage } from "./storage";
 
 const initialCategories = [
   {
@@ -60,11 +61,18 @@ const initialCategories = [
   },
 ];
 
+async function seedRoles() {
+  await storage.ensureRole("buyer", "Standard buyer account");
+  await storage.ensureRole("seller", "Approved seller account");
+  await storage.ensureRole("admin", "Platform administrator");
+}
+
 export async function seedDatabase() {
   try {
-    // Check if categories already exist
+    await seedRoles();
+
     const existingCategories = await db.select().from(categories);
-    
+
     if (existingCategories.length === 0) {
       console.log("Seeding categories...");
       await db.insert(categories).values(initialCategories);
@@ -77,4 +85,3 @@ export async function seedDatabase() {
     throw error;
   }
 }
-

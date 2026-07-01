@@ -4,8 +4,11 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AdminRoute, ApprovedSellerRoute } from "@/components/auth/protected-route";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
+import Login from "@/pages/login";
+import Register from "@/pages/register";
 import Products from "@/pages/products";
 import ProductDetail from "@/pages/product-detail";
 import Categories from "@/pages/categories";
@@ -22,6 +25,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Landing} />
+      <Route path="/login" component={Login} />
+      <Route path="/register" component={Register} />
       <Route path="/products" component={Products} />
       <Route path="/products/:id" component={ProductDetail} />
       <Route path="/categories" component={Categories} />
@@ -31,9 +36,15 @@ function Router() {
       <Route path="/checkout" component={Checkout} />
       <Route path="/become-seller" component={BecomeSeller} />
       <Route path="/seller/dashboard" component={SellerDashboard} />
-      <Route path="/seller/products/new" component={ProductForm} />
-      <Route path="/seller/products/:id/edit" component={ProductForm} />
-      <Route path="/admin" component={AdminDashboard} />
+      <Route path="/seller/products/new">
+        {() => <ApprovedSellerRoute><ProductForm /></ApprovedSellerRoute>}
+      </Route>
+      <Route path="/seller/products/:id/edit">
+        {() => <ApprovedSellerRoute><ProductForm /></ApprovedSellerRoute>}
+      </Route>
+      <Route path="/admin">
+        {() => <AdminRoute><AdminDashboard /></AdminRoute>}
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );
