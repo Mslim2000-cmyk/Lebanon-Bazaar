@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run build:vercel",
+  "outputDirectory": "dist/public",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api" },
+    { "source": "/objects/:path*", "destination": "/api" },
+    { "source": "/:path*", "destination": "/index.html" }
+  ]
+}

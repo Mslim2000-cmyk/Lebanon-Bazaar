@@ -85,3 +85,17 @@ export async function seedDatabase() {
     throw error;
   }
 }
+
+// Standalone execution: npm run db:seed
+// Runs seedDatabase and exits — safe to run multiple times (fully idempotent)
+if (process.argv[1]?.endsWith("seed.ts") || process.argv[1]?.endsWith("seed.js")) {
+  seedDatabase()
+    .then(() => {
+      console.log("Seed complete.");
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error("Seed failed:", err);
+      process.exit(1);
+    });
+}

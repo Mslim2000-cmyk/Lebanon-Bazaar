@@ -86,9 +86,11 @@ export function useUpload(options: UseUploadOptions = {}) {
 
   /**
    * Upload a file directly to the presigned URL.
+   * Returns the server's response body, which may include a final objectPath
+   * (e.g. a Vercel Blob URL in production that overrides the one from request-url).
    */
   const uploadToPresignedUrl = useCallback(
-    async (file: File, uploadURL: string): Promise<void> => {
+    async (file: File, uploadURL: string): Promise<{ objectPath?: string }> => {
       const response = await fetch(uploadURL, {
         method: "PUT",
         body: file,
@@ -100,6 +102,8 @@ export function useUpload(options: UseUploadOptions = {}) {
       if (!response.ok) {
         throw new Error("Failed to upload file to storage");
       }
+
+      return response.json().catch(() => ({}));
     },
     []
   );
@@ -119,11 +123,15 @@ export function useUpload(options: UseUploadOptions = {}) {
       try {
         // Step 1: Request presigned URL (send metadata as JSON)
         setProgress(10);
-        const uploadResponse = await requestUploadUrl(file);
+        const urlResponse = await requestUploadUrl(file);
 
         // Step 2: Upload file directly to presigned URL
+        // The PUT response returns { objectPath } — use it if present (Vercel Blob URL in
+        // production), otherwise fall back to the objectPath from step 1 (local dev).
         setProgress(30);
-        await uploadToPresignedUrl(file, uploadResponse.uploadURL);
+        const putData = await uploadToPresignedUrl(file, urlResponse.uploadURL);
+        const objectPath = putData.objectPath || urlResponse.objectPath;
+        const uploadResponse: UploadResponse = { ...urlResponse, objectPath };
 
         setProgress(100);
         options.onSuccess?.(uploadResponse);

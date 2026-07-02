@@ -1,5 +1,4 @@
 import type { Express, Request, Response, NextFunction } from "express";
-import type { Server } from "http";
 import { storage } from "./storage";
 import {
   insertCategorySchema,
@@ -42,10 +41,7 @@ function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => P
   };
 }
 
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
+export function registerRoutes(app: Express): void {
 
   // ========== AUTH ROUTES ==========
 
@@ -468,6 +464,4 @@ export async function registerRoutes(
     });
     res.json({ message: "Order deleted" });
   }));
-
-  return httpServer;
 }
